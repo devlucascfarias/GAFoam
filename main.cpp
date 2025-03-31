@@ -18,10 +18,21 @@
 #include <QTimer>
 #include <QSysInfo>
 #include <QStorageInfo>
+#include <QTreeView>
+#include <QStandardItemModel>
+#include <QDir>
+#include <QFileInfo>
 
 class OpenFOAMInterface : public QWidget
 {
     Q_OBJECT
+
+    QTreeView *treeView;
+    QStandardItemModel *treeModel;
+
+
+
+
 
 public:
     OpenFOAMInterface(QWidget *parent = nullptr) : QWidget(parent)
@@ -73,6 +84,14 @@ private:
         QAction *checkMeshAction = new QAction("Checar Malha", this);
         QAction *importUNVAction = new QAction("Importar Arquivo (.unv)", this);
         QAction *clearTerminalAction = new QAction("Limpar Terminal", this);
+
+        QAction *refreshTreeAction = new QAction("Atualizar Árvore", this);
+        fileMenu->addAction(refreshTreeAction);
+        connect(refreshTreeAction, &QAction::triggered, this, [this]() {
+            if (!unvFilePath.isEmpty()) {
+                populateTreeView(QFileInfo(unvFilePath).absolutePath());
+            }
+        });
 
         fileMenu->addAction(checkMeshAction);
         fileMenu->addAction(importUNVAction);
@@ -129,9 +148,23 @@ private:
         editorLayout->addWidget(editButton);
         editorLayout->addWidget(saveButton);
 
-        // Adicionar à área principal
+        // Criação do QTreeView
+
+        treeView = new QTreeView(this);
+        treeModel = new QStandardItemModel(this);
+        treeView->setModel(treeModel);
+        treeView->setHeaderHidden(true); // Esconde o cabeçalho
+
+
+        // Adicionar o QTreeView à área principal
+        QVBoxLayout *treeLayout = new QVBoxLayout();
+        treeLayout->addWidget(new QLabel("Diretórios", this));
+        treeLayout->addWidget(treeView);
+
         contentLayout->addLayout(terminalLayout, 1);
         contentLayout->addLayout(editorLayout, 1);
+        contentLayout->addLayout(treeLayout, 1);  // Adicionar o QTreeView no lado direito
+
         mainLayout->addLayout(contentLayout, 1);
 
         // Conexões
@@ -142,6 +175,21 @@ private:
         connect(editButton, &QPushButton::clicked, this, &OpenFOAMInterface::editFile);
         connect(saveButton, &QPushButton::clicked, this, &OpenFOAMInterface::saveFile);
         connect(terminalInput, &QLineEdit::returnPressed, this, &OpenFOAMInterface::executeTerminalCommand);
+        connect(treeView, &QTreeView::doubleClicked, this, [this](const QModelIndex &index) {
+            QStandardItem *item = treeModel->itemFromIndex(index);
+            if (item && !item->hasChildren()) {  // Se for um arquivo (não tem filhos)
+                QString filePath = item->data(Qt::UserRole).toString();
+                if (!filePath.isEmpty()) {
+                    QFile file(filePath);
+                    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                        currentFilePath = filePath;
+                        fileEditor->setPlainText(file.readAll());
+                        file.close();
+                        statusBar->showMessage("Arquivo carregado: " + filePath, 3000);
+                    }
+                }
+            }
+        });
     }
 
     void setupStatusBar(QVBoxLayout *mainLayout)
@@ -203,6 +251,60 @@ private:
                               .arg(memTotal, 0, 'f', 1));
     }
 
+    void populateTreeView(const QString &casePath)
+    {
+        treeModel->clear();
+        treeModel->setHorizontalHeaderLabels({"Estrutura do Caso"});
+
+        QDir caseDir(casePath);
+        if (!caseDir.exists()) {
+            outputArea->append("Diretório do caso não encontrado: " + casePath);
+            return;
+        }
+
+        // Adiciona os diretórios principais do caso OpenFOAM
+        QStandardItem *rootItem = treeModel->invisibleRootItem();
+
+        // Pastas principais do OpenFOAM
+        QStringList mainDirs = {"system", "constant", "0", "processor*"};
+
+        // Adiciona todas as pastas e arquivos do diretório do caso
+        addDirectoryToTree(caseDir.path(), rootItem);
+
+        // Expande a árvore para mostrar o primeiro nível
+        treeView->expandAll();
+    }
+
+    void addDirectoryToTree(const QString &path, QStandardItem *parent)
+    {
+        QDir dir(path);
+        QString dirName = dir.dirName();
+        QStandardItem *item = new QStandardItem(dirName);
+
+        // Ícone para pastas
+        item->setIcon(QIcon::fromTheme("folder"));
+        parent->appendRow(item);
+
+        // Configuração para listar diretórios e arquivos
+        QDir::Filters filters = QDir::AllEntries | QDir::NoDotAndDotDot;
+        QDir::SortFlags sorting = QDir::DirsFirst | QDir::Name | QDir::IgnoreCase;
+
+        // Adiciona subdiretórios e arquivos
+        for (const QFileInfo &info : dir.entryInfoList(filters, sorting)) {
+            if (info.isDir()) {
+                addDirectoryToTree(info.absoluteFilePath(), item);
+            } else {
+                QStandardItem *fileItem = new QStandardItem(info.fileName());
+
+                // Ícone para arquivos
+                fileItem->setIcon(QIcon::fromTheme("text-x-generic"));
+                item->appendRow(fileItem);
+
+                // Armazena o caminho completo como dado do item
+                fileItem->setData(info.absoluteFilePath(), Qt::UserRole);
+            }
+        }
+    }
 private slots:
 
     void openParaview()
@@ -234,6 +336,9 @@ private slots:
             outputArea->append("Arquivo UNV escolhido: " + fileName);
             meshPathLabel->setText("Malha: " + QFileInfo(fileName).fileName());
             statusBar->showMessage("Malha carregada com sucesso", 3000);
+
+            // Carrega a estrutura do diretório do caso na árvore
+            populateTreeView(QFileInfo(fileName).absolutePath());
         }
     }
 
