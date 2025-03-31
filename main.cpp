@@ -126,12 +126,17 @@ private:
         terminalInput->setPlaceholderText(">>");
         terminalLayout->addWidget(terminalInput);
 
+
+        QPushButton *convertButton = new QPushButton("Converter Malha", this);
         QPushButton *runButton = new QPushButton("Rodar Simulação", this);
+        QPushButton *reconsctructButton = new QPushButton("Reconstruir", this);
         QPushButton *decomposeParButton = new QPushButton("Decompor núcleos", this);
         QPushButton *clearDecomposeButton = new QPushButton("Limpar Processadores", this);
         QPushButton *stopButton = new QPushButton("Parar Simulação", this);
 
+        terminalLayout->addWidget(convertButton);
         terminalLayout->addWidget(runButton);
+        terminalLayout->addWidget(reconsctructButton);
         terminalLayout->addWidget(decomposeParButton);
         terminalLayout->addWidget(clearDecomposeButton);
         terminalLayout->addWidget(stopButton);
@@ -168,7 +173,9 @@ private:
         mainLayout->addLayout(contentLayout, 1);
 
         // Conexões
+        connect(convertButton, &QPushButton::clicked, this, &OpenFOAMInterface::convertMesh);
         connect(runButton, &QPushButton::clicked, this, &OpenFOAMInterface::runSimulation);
+        connect(reconsctructButton, &QPushButton::clicked, this, &OpenFOAMInterface::reconstructPar);
         connect(decomposeParButton, &QPushButton::clicked, this, &OpenFOAMInterface::decomposePar);
         connect(clearDecomposeButton, &QPushButton::clicked, this, &OpenFOAMInterface::clearDecomposedProcessors);
         connect(stopButton, &QPushButton::clicked, this, &OpenFOAMInterface::stopSimulation);
@@ -350,8 +357,9 @@ private slots:
         }
 
         statusBar->showMessage("Executando checkMesh...");
-        QString command = QString("bash -l -c \"source /opt/openfoam9/etc/bashrc && ideasUnvToFoam %1 && blockMesh && checkMesh\"")
-                          .arg(unvFilePath);
+
+        // Comando para rodar o checkMesh após a conversão da malha
+        QString command = QString("bash -l -c \"source /opt/openfoam9/etc/bashrc && checkMesh\"");
 
         QProcess *process = new QProcess(this);
         setupProcessEnvironment(process);
@@ -361,6 +369,31 @@ private slots:
         process->start(command);
     }
 
+
+    // Função para converter o arquivo UNV para OpenFOAM
+    void convertMesh()
+    {
+        if (unvFilePath.isEmpty()) {
+            statusBar->showMessage("Erro: Nenhum arquivo UNV selecionado", 3000);
+            return;
+        }
+
+        statusBar->showMessage("Convertendo malha para OpenFOAM...");
+
+        // Comando para converter o arquivo UNV para o formato OpenFOAM
+        QString command = QString("bash -l -c \"source /opt/openfoam9/etc/bashrc && "
+                                  "ideasUnvToFoam %1\"")
+                              .arg(unvFilePath);
+
+        QProcess *process = new QProcess(this);
+        setupProcessEnvironment(process);
+
+        connectProcessSignals(process);
+        outputArea->append("Comando executado: " + command);
+        process->start(command);
+    }
+
+    // Função para rodar a simulação (como no código original)
     void runSimulation()
     {
         if (unvFilePath.isEmpty()) {
@@ -370,8 +403,9 @@ private slots:
 
         statusBar->showMessage("Iniciando simulação...");
 
-        QString command = QString("bash -l -c \"source /opt/openfoam9/etc/bashrc && ideasUnvToFoam %1 && blockMesh && twoLiquidMixingFoam\"")
-                          .arg(unvFilePath);
+        // Ajuste na string para incluir o arquivo UNV corretamente
+        QString command = QString("bash -l -c \"source /opt/openfoam9/etc/bashrc && "
+                                  "mpirun -np 6 twoLiquidMixingFoam -parallel\"");
 
         currentProcess = new QProcess(this);
         setupProcessEnvironment(currentProcess);
@@ -386,6 +420,36 @@ private slots:
         outputArea->append("Comando executado: " + command);
         currentProcess->start(command);
     }
+
+    void reconstructPar()
+    {
+        if (unvFilePath.isEmpty()) {
+            statusBar->showMessage("Erro: Nenhum arquivo UNV selecionado", 3000);
+            return;
+        }
+
+        statusBar->showMessage("Iniciando simulação...");
+
+        // Ajuste na string para incluir o arquivo UNV corretamente
+        QString command = QString("bash -l -c \"source /opt/openfoam9/etc/bashrc && "
+                                  "reconstructPar\"");
+
+        currentProcess = new QProcess(this);
+        setupProcessEnvironment(currentProcess);
+
+        connect(currentProcess, QOverload<int>::of(&QProcess::finished),
+                [this](int code) {
+                    statusBar->showMessage(QString("Simulação finalizada com código %1").arg(code), 5000);
+                    currentProcess = nullptr;
+                });
+
+        connectProcessSignals(currentProcess);
+        outputArea->append("Comando executado: " + command);
+        currentProcess->start(command);
+    }
+
+
+
 
     void decomposePar()
     {
@@ -407,7 +471,7 @@ private slots:
     }
 
     void clearDecomposedProcessors() {
-        QDir caseDir("/home/gaf/build-GAFoam-Desktop-Debug"); // Substitua pelo caminho correto
+        QDir caseDir("/home/gaf/build-GAFoam-Desktop-Debug"); //
 
         QStringList processorDirs = caseDir.entryList(QStringList() << "processor*", QDir::Dirs | QDir::NoDotAndDotDot);
         bool removedAny = false;
