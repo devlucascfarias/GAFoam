@@ -131,6 +131,7 @@ private:
         QPushButton *runButton = new QPushButton("Rodar Simulação", this);
         QPushButton *reconsctructButton = new QPushButton("Reconstruir", this);
         QPushButton *decomposeParButton = new QPushButton("Decompor núcleos", this);
+        QPushButton *clearSimulationButton = new QPushButton("Limpar arquivos de simulação");
         QPushButton *clearDecomposeButton = new QPushButton("Limpar Processadores", this);
         QPushButton *stopButton = new QPushButton("Parar Simulação", this);
 
@@ -139,6 +140,7 @@ private:
         terminalLayout->addWidget(reconsctructButton);
         terminalLayout->addWidget(decomposeParButton);
         terminalLayout->addWidget(clearDecomposeButton);
+        terminalLayout->addWidget(clearSimulationButton);
         terminalLayout->addWidget(stopButton);
 
         // Área do editor
@@ -178,6 +180,7 @@ private:
         connect(reconsctructButton, &QPushButton::clicked, this, &OpenFOAMInterface::reconstructPar);
         connect(decomposeParButton, &QPushButton::clicked, this, &OpenFOAMInterface::decomposePar);
         connect(clearDecomposeButton, &QPushButton::clicked, this, &OpenFOAMInterface::clearDecomposedProcessors);
+        connect(clearSimulationButton, &QPushButton::clicked, this, &OpenFOAMInterface:: clearSimulation);
         connect(stopButton, &QPushButton::clicked, this, &OpenFOAMInterface::stopSimulation);
         connect(editButton, &QPushButton::clicked, this, &OpenFOAMInterface::editFile);
         connect(saveButton, &QPushButton::clicked, this, &OpenFOAMInterface::saveFile);
@@ -470,6 +473,36 @@ private slots:
         process->start(command);
     }
 
+    void clearSimulation() {
+        QDir caseDir("/home/gaf/build-GAFoam-Desktop-Debug");
+
+        // Lista todas as pastas no diretório do caso
+        QStringList timeDirs = caseDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+
+        bool removedAny = false;
+
+        for (const QString &dir : timeDirs) {
+            bool isNumber;
+            double timeValue = dir.toDouble(&isNumber);
+
+            // Se o nome da pasta for um número e maior que zero, remover
+            if (isNumber && timeValue > 0) {
+                QDir timeDir(caseDir.filePath(dir));
+                if (timeDir.removeRecursively()) {
+                    outputArea->append("Removendo pasta de tempo: " + dir);
+                    removedAny = true;
+                }
+            }
+        }
+
+        if (removedAny) {
+            statusBar->showMessage("Pastas de tempo reconstruídas removidas.", 3000);
+        } else {
+            statusBar->showMessage("Nenhuma pasta de tempo encontrada.", 3000);
+        }
+    }
+
+
     void clearDecomposedProcessors() {
         QDir caseDir("/home/gaf/build-GAFoam-Desktop-Debug"); //
 
@@ -490,8 +523,6 @@ private slots:
             statusBar->showMessage("Nenhuma pasta de decomposição encontrada.", 3000);
         }
     }
-
-
 
     void stopSimulation()
     {
