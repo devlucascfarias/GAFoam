@@ -51,6 +51,19 @@ public:
     }
 
 private:
+
+    void clearOldProcessorDirs() {
+        QDir caseDir("/home/gaf/build-GAFoam-Desktop-Debug"); // Substitua pelo caminho correto
+
+        QStringList processorDirs = caseDir.entryList(QStringList() << "processor*", QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString &dir : processorDirs) {
+            QDir processorDir(caseDir.filePath(dir));
+            if (processorDir.removeRecursively()) {
+                outputArea->append("Removendo pasta antiga: " + dir);
+            }
+        }
+    }
+
     void setupMenuBar(QVBoxLayout *mainLayout)
     {
         QMenuBar *menuBar = new QMenuBar(this);
@@ -82,6 +95,10 @@ private:
         QVBoxLayout *terminalLayout = new QVBoxLayout();
         terminalLayout->addWidget(new QLabel("Terminal e Logs", this));
 
+        QPushButton *openParaviewButton = new QPushButton("Abrir no ParaView", this);
+        terminalLayout->addWidget(openParaviewButton);
+        connect(openParaviewButton, &QPushButton::clicked, this, &OpenFOAMInterface::openParaview);
+
         outputArea = new QTextEdit(this);
         outputArea->setReadOnly(true);
         terminalLayout->addWidget(outputArea);
@@ -91,8 +108,13 @@ private:
         terminalLayout->addWidget(terminalInput);
 
         QPushButton *runButton = new QPushButton("Rodar Simulação", this);
+        QPushButton *decomposeParButton = new QPushButton("Decompor núcleos", this);
+        QPushButton *clearDecomposeButton = new QPushButton("Limpar Processadores", this);
         QPushButton *stopButton = new QPushButton("Parar Simulação", this);
+
         terminalLayout->addWidget(runButton);
+        terminalLayout->addWidget(decomposeParButton);
+        terminalLayout->addWidget(clearDecomposeButton);
         terminalLayout->addWidget(stopButton);
 
         // Área do editor
@@ -114,6 +136,8 @@ private:
 
         // Conexões
         connect(runButton, &QPushButton::clicked, this, &OpenFOAMInterface::runSimulation);
+        connect(decomposeParButton, &QPushButton::clicked, this, &OpenFOAMInterface::decomposePar);
+        connect(clearDecomposeButton, &QPushButton::clicked, this, &OpenFOAMInterface::clearDecomposedProcessors);
         connect(stopButton, &QPushButton::clicked, this, &OpenFOAMInterface::stopSimulation);
         connect(editButton, &QPushButton::clicked, this, &OpenFOAMInterface::editFile);
         connect(saveButton, &QPushButton::clicked, this, &OpenFOAMInterface::saveFile);
@@ -138,7 +162,7 @@ private:
 
     void updateSystemUsage()
     {
-        // Obter uso de CPU (simplificado)
+        //
         static qint64 lastIdle = 0, lastTotal = 0;
 
         QFile file("/proc/stat");
@@ -180,6 +204,28 @@ private:
     }
 
 private slots:
+
+    void openParaview()
+    {
+        if (unvFilePath.isEmpty()) {
+            statusBar->showMessage("Erro: Nenhum caso selecionado", 3000);
+            return;
+        }
+
+        QString caseDir = QFileInfo(unvFilePath).absolutePath();
+        QString command = QString("paraview --data=%1").arg(caseDir + "/foam.foam");
+
+        QProcess *process = new QProcess(this);
+        process->start(command);
+
+        if (!process->waitForStarted()) {
+            statusBar->showMessage("Erro ao abrir o ParaView", 3000);
+        } else {
+            statusBar->showMessage("ParaView iniciado com sucesso", 3000);
+        }
+    }
+
+
     void chooseUNV()
     {
         QString fileName = QFileDialog::getOpenFileName(this, "Escolher Arquivo UNV", "", "Arquivos UNV (*.unv)");
@@ -199,7 +245,6 @@ private slots:
         }
 
         statusBar->showMessage("Executando checkMesh...");
-
         QString command = QString("bash -l -c \"source /opt/openfoam9/etc/bashrc && ideasUnvToFoam %1 && blockMesh && checkMesh\"")
                           .arg(unvFilePath);
 
@@ -236,6 +281,48 @@ private slots:
         outputArea->append("Comando executado: " + command);
         currentProcess->start(command);
     }
+
+    void decomposePar()
+    {
+        if (unvFilePath.isEmpty()) {
+            statusBar->showMessage("Erro: Nenhum arquivo UNV selecionado", 3000);
+            return;
+        }
+
+        statusBar->showMessage("Executando decomposePar...");
+
+        QString command = "bash -l -c \"source /opt/openfoam9/etc/bashrc && decomposePar\"";
+
+        QProcess *process = new QProcess(this);
+        setupProcessEnvironment(process);
+
+        connectProcessSignals(process);
+        outputArea->append("Comando executado: " + command);
+        process->start(command);
+    }
+
+    void clearDecomposedProcessors() {
+        QDir caseDir("/home/gaf/build-GAFoam-Desktop-Debug"); // Substitua pelo caminho correto
+
+        QStringList processorDirs = caseDir.entryList(QStringList() << "processor*", QDir::Dirs | QDir::NoDotAndDotDot);
+        bool removedAny = false;
+
+        for (const QString &dir : processorDirs) {
+            QDir processorDir(caseDir.filePath(dir));
+            if (processorDir.removeRecursively()) {
+                outputArea->append("Removendo pasta: " + dir);
+                removedAny = true;
+            }
+        }
+
+        if (removedAny) {
+            statusBar->showMessage("Pastas de decomposição removidas.", 3000);
+        } else {
+            statusBar->showMessage("Nenhuma pasta de decomposição encontrada.", 3000);
+        }
+    }
+
+
 
     void stopSimulation()
     {
@@ -322,6 +409,7 @@ private slots:
     }
 
 private:
+
     void setupProcessEnvironment(QProcess *process)
     {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
