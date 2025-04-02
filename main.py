@@ -14,14 +14,13 @@ class OpenFOAMInterface(QWidget):
         self.setWindowTitle("GAFoam")
         self.resize(1000, 600)
         
-        # Variáveis de estado
         self.unvFilePath = ""
         self.currentFilePath = ""
         self.currentOpenFOAMVersion = "openfoam9"
         self.currentSolver = "twoLiquidMixingFoam"
         self.currentProcess = None
         
-        # Layout principal
+
         self.mainVerticalLayout = QVBoxLayout(self)
         self.mainVerticalLayout.setContentsMargins(5, 5, 5, 5)
         
@@ -29,7 +28,6 @@ class OpenFOAMInterface(QWidget):
         self.setupMainContentArea()
         self.setupStatusBar()
         
-        # Timer para monitoramento do sistema
         self.systemMonitorTimer = QTimer(self)
         self.systemMonitorTimer.timeout.connect(self.updateSystemUsage)
         self.systemMonitorTimer.start(2000)
@@ -62,7 +60,6 @@ class OpenFOAMInterface(QWidget):
     def setupMenuBar(self):
         self.menuBar = QMenuBar(self)
         
-        # Menu Arquivo
         fileMenu = QMenu("Arquivo", self.menuBar)
         
         refreshTreeAction = QAction("Atualizar Árvore", self)
@@ -78,7 +75,6 @@ class OpenFOAMInterface(QWidget):
         fileMenu.addAction(checkMeshAction)
         fileMenu.addAction(importUNVAction)
         
-        # Menu Terminal
         terminalMenu = QMenu("Terminal", self.menuBar)
         
         clearTerminalAction = QAction("Limpar Terminal", self)
@@ -87,6 +83,7 @@ class OpenFOAMInterface(QWidget):
         terminalMenu.addAction(clearTerminalAction)
         
         # Menu OpenFOAM
+
         openfoamMenu = QMenu("OpenFOAM", self.menuBar)
         
         self.versionComboBox = QComboBox(self)
@@ -99,6 +96,7 @@ class OpenFOAMInterface(QWidget):
         openfoamMenu.addAction(versionAction)
         
         # Menu Solver
+
         solverMenu = QMenu("Solver", self.menuBar)
         
         selectSolverAction = QAction("Selecionar Solver...", self)
@@ -107,6 +105,7 @@ class OpenFOAMInterface(QWidget):
         solverMenu.addAction(selectSolverAction)
         
         # Adiciona menus à barra de menus
+        
         self.menuBar.addMenu(fileMenu)
         self.menuBar.addMenu(terminalMenu)
         self.menuBar.addMenu(openfoamMenu)
