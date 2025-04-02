@@ -1,6 +1,8 @@
 import os
 import sys
 import re
+import numpy as np
+import pyqtgraph as pg
 from PyQt5.QtWidgets import (QApplication, QWidget, QWidgetAction, QPushButton, QVBoxLayout, QHBoxLayout, 
                              QFileDialog, QTextEdit, QLabel, QMenuBar, QMenu, QAction, 
                              QLineEdit, QStatusBar, QTreeView, QComboBox)
@@ -20,7 +22,12 @@ class OpenFOAMInterface(QWidget):
         self.currentSolver = "twoLiquidMixingFoam"
         self.currentProcess = None
         
-
+        # Dados para gráfico de resíduos
+        self.residualData = {}
+        self.timeData = []
+        self.residualLines = {}
+        self.colors = ['r', 'g', 'b', 'c', 'm', 'y', 'w']  # Cores para diferentes variáveis
+        
         self.mainVerticalLayout = QVBoxLayout(self)
         self.mainVerticalLayout.setContentsMargins(5, 5, 5, 5)
         
@@ -105,7 +112,7 @@ class OpenFOAMInterface(QWidget):
         solverMenu.addAction(selectSolverAction)
         
         # Adiciona menus à barra de menus
-        
+
         self.menuBar.addMenu(fileMenu)
         self.menuBar.addMenu(terminalMenu)
         self.menuBar.addMenu(openfoamMenu)
@@ -134,6 +141,7 @@ class OpenFOAMInterface(QWidget):
         contentLayout = QHBoxLayout()
         
         # Área do terminal (esquerda)
+        leftContentLayout = QVBoxLayout()
         terminalLayout = QVBoxLayout()
         terminalLayout.addWidget(QLabel("Terminal e Logs", self))
         
@@ -150,7 +158,47 @@ class OpenFOAMInterface(QWidget):
         self.terminalInput.returnPressed.connect(self.executeTerminalCommand)
         terminalLayout.addWidget(self.terminalInput)
         
-        # Botões de ação
+        leftContentLayout.addLayout(terminalLayout)
+        
+        # Adicionar gráfico de resíduos
+        residualLayout = QVBoxLayout()
+        residualLayout.addWidget(QLabel("Gráfico de Resíduos", self))
+        
+        self.graphWidget = pg.PlotWidget()
+        self.graphWidget.setLabel('left', 'Resíduos')
+        self.graphWidget.setLabel('bottom', 'Tempo')
+        self.graphWidget.setLogMode(y=True)  
+        self.graphWidget.showGrid(x=True, y=True)
+        self.graphWidget.addLegend()
+        residualLayout.addWidget(self.graphWidget)
+        
+        graphControlLayout = QHBoxLayout()
+
+        self.clearPlotButton = QPushButton("Limpar Gráfico", self)
+        self.clearPlotButton.clicked.connect(self.clearResidualPlot)
+
+        self.toggleLogScaleButton = QPushButton("Alternar Escala Log", self)
+        self.toggleLogScaleButton.clicked.connect(self.toggleLogScale)  
+
+        self.exportPlotDataButton = QPushButton("Exportar Dados", self)
+        self.exportPlotDataButton.clicked.connect(self.exportPlotData)  
+
+        graphControlLayout.addWidget(self.clearPlotButton)
+        graphControlLayout.addWidget(self.toggleLogScaleButton)
+        graphControlLayout.addWidget(self.exportPlotDataButton)
+
+        self.mockDataButton = QPushButton("Gerar Dados Fictícios", self)
+        self.mockDataButton.clicked.connect(self.generateMockData)
+        graphControlLayout.addWidget(self.mockDataButton)
+
+        residualLayout.addLayout(graphControlLayout)
+        
+        leftContentLayout.addLayout(residualLayout)
+        
+        # Botões
+
+        buttonLayout = QVBoxLayout()
+        
         self.convertButton = QPushButton("Converter Malha", self)
         self.convertButton.clicked.connect(self.convertMesh)
         
@@ -173,13 +221,15 @@ class OpenFOAMInterface(QWidget):
         self.clearSimulationButton.clicked.connect(self.clearSimulation)
         
         # Adiciona botões ao layout
-        terminalLayout.addWidget(self.convertButton)
-        terminalLayout.addWidget(self.decomposeParButton)
-        terminalLayout.addWidget(self.runButton)
-        terminalLayout.addWidget(self.stopButton)
-        terminalLayout.addWidget(self.reconstructButton)
-        terminalLayout.addWidget(self.clearDecomposeButton)
-        terminalLayout.addWidget(self.clearSimulationButton)
+        buttonLayout.addWidget(self.convertButton)
+        buttonLayout.addWidget(self.decomposeParButton)
+        buttonLayout.addWidget(self.runButton)
+        buttonLayout.addWidget(self.stopButton)
+        buttonLayout.addWidget(self.reconstructButton)
+        buttonLayout.addWidget(self.clearDecomposeButton)
+        buttonLayout.addWidget(self.clearSimulationButton)
+        
+        leftContentLayout.addLayout(buttonLayout)
         
         # Área do editor (centro)
         editorLayout = QVBoxLayout()
@@ -210,12 +260,50 @@ class OpenFOAMInterface(QWidget):
         treeLayout.addWidget(self.treeView)
         
         # Adiciona os layouts ao layout principal
-        contentLayout.addLayout(terminalLayout, 1)
+        contentLayout.addLayout(leftContentLayout, 3)
         contentLayout.addLayout(editorLayout, 1)
         contentLayout.addLayout(treeLayout, 1)
         
         self.mainVerticalLayout.addLayout(contentLayout, 1)
-    
+
+        self.treeUpdateTimer = QTimer(self)
+        self.treeUpdateTimer.timeout.connect(lambda: self.populateTreeView())
+        self.treeUpdateTimer.start(5000)  # Atualiza a cada 5 segundos
+
+    def toggleLogScale(self):
+        """Alterna entre escala linear e logarítmica no eixo Y"""
+        current = self.graphWidget.getViewBox().getState()['logMode'][1]
+        self.graphWidget.setLogMode(y=not current)
+        scale_type = "logarítmica" if not current else "linear"
+        self.statusBar.showMessage(f"Escala {scale_type} ativada", 2000)
+
+    def exportPlotData(self):
+        """Exporta os dados do gráfico para um arquivo CSV"""
+        if not self.timeData:
+            self.statusBar.showMessage("Nenhum dado para exportar", 2000)
+            return
+            
+        fileName, _ = QFileDialog.getSaveFileName(
+            self, "Salvar dados de resíduos", "", "CSV Files (*.csv)"
+        )
+        
+        if fileName:
+            with open(fileName, 'w') as f:
+                header = "Time," + ",".join(self.residualData.keys())
+                f.write(header + "\n")
+                
+                for i, time in enumerate(self.timeData):
+                    line = f"{time}"
+                    for var in self.residualData:
+                        if i < len(self.residualData[var]):
+                            value = self.residualData[var][i]
+                            line += f",{value if value is not None else ''}"
+                        else:
+                            line += ","
+                    f.write(line + "\n")
+                    
+            self.statusBar.showMessage(f"Dados exportados para {fileName}", 3000)
+        
     def onTreeViewDoubleClicked(self, index):
         item = self.treeModel.itemFromIndex(index)
         if item and not item.hasChildren():
@@ -273,17 +361,16 @@ class OpenFOAMInterface(QWidget):
             f"Memória: {int(memPercent)}% ({memUsed:.1f}G/{memTotal:.1f}G)"
         )
     
-    def populateTreeView(self, casePath):
-        self.treeModel.clear()
-        self.treeModel.setHorizontalHeaderLabels(["Estrutura do Caso"])
+    def populateTreeView(self, casePath=None):
+        """Atualiza a árvore de diretórios com o conteúdo do caso"""
+        if not casePath:
+            casePath = QFileInfo(self.unvFilePath).absolutePath() if self.unvFilePath else "/home/gaf/build-GAFoam-Desktop-Debug"
         
-        caseDir = QDir(casePath)
-        if not caseDir.exists():
-            self.outputArea.append(f"Diretório do caso não encontrado: {casePath}")
-            return
-        
-        rootItem = self.treeModel.invisibleRootItem()
-        self.addDirectoryToTree(caseDir.path(), rootItem)
+        self.treeModel = QStandardItemModel(self)
+        rootItem = QStandardItem(QIcon.fromTheme("folder"), casePath)
+        self.treeModel.appendRow(rootItem)
+        self.addDirectoryToTree(casePath, rootItem)
+        self.treeView.setModel(self.treeModel)
         self.treeView.expandAll()
     
     def addDirectoryToTree(self, path, parent):
@@ -365,6 +452,84 @@ class OpenFOAMInterface(QWidget):
         self.outputArea.append(f"Comando executado: {command}")
         process.start(command)
     
+    def parseResiduals(self, text):
+        """Analisa o texto de saída para extrair dados de resíduos"""
+        lines = text.strip().split('\n')
+        current_time = None
+        
+        for line in lines:
+            # Captura o tempo atual
+            time_match = re.search(r'Time\s*=\s*([0-9.e+-]+)', line)
+            if time_match:
+                current_time = float(time_match.group(1))
+                if current_time not in self.timeData:
+                    self.timeData.append(current_time)
+                    self.outputArea.append(f"Tempo detectado: {current_time}")
+                continue
+            
+            # Captura resíduos iniciais no formato do OpenFOAM
+            # Exemplo: "smoothSolver:  Solving for Ux, Initial residual = 1, Final residual = 4.60944e-08, No Iterations 6"
+            # Ou: "GAMG:  Solving for p_rgh, Initial residual = 1, Final residual = 0.0094947, No Iterations 59"
+            residual_match = re.search(r'(?:smoothSolver|GAMG|PCG|PBiCGStab):\s+Solving for ([a-zA-Z0-9_]+), Initial residual = ([0-9.e+-]+)', line)
+            if residual_match and current_time is not None:
+                variable = residual_match.group(1)
+                residual = float(residual_match.group(2))
+                
+                if variable not in self.residualData:
+                    self.residualData[variable] = []
+                    color_idx = len(self.residualData) % len(self.colors)
+                    pen = pg.mkPen(color=self.colors[color_idx], width=2)
+                    self.residualLines[variable] = self.graphWidget.plot(
+                        [], [], name=variable, pen=pen, symbolBrush=self.colors[color_idx], 
+                        symbolPen='w', symbol='o', symbolSize=5
+                    )
+                    self.outputArea.append(f"Nova variável detectada: {variable}")
+                    
+                # Certifica-se de que os dados têm o mesmo comprimento
+                while len(self.residualData[variable]) < len(self.timeData) - 1:
+                    self.residualData[variable].append(None)
+                
+                self.residualData[variable].append(residual)
+                
+                # Atualiza o gráfico
+                self.updateResidualPlot(variable)
+    
+    def updateResidualPlot(self, variable):
+        """Atualiza o gráfico de resíduos para a variável especificada"""
+        if variable in self.residualLines and variable in self.residualData:
+            valid_data = [(time, res) for time, res in zip(self.timeData, self.residualData[variable]) 
+                         if res is not None]
+            if valid_data:
+                x_data, y_data = zip(*valid_data)
+                self.residualLines[variable].setData(x_data, y_data)
+
+    def clearResidualPlot(self):
+        """Limpa o gráfico de resíduos"""
+        self.timeData = []
+        self.residualData = {}
+        self.graphWidget.clear()
+        self.residualLines = {}
+
+    def connectProcessSignals(self, process):
+        """Conecta os sinais do processo para capturar saída e erros"""
+        def readOutput():
+            while process.canReadLine():
+                output = str(process.readLine(), 'utf-8').strip()
+                self.outputArea.append(output)
+                self.parseResiduals(output)  # Analisa resíduos em tempo real
+        
+        def readError():
+            while process.canReadLine():
+                error = str(process.readLineStandardError(), 'utf-8').strip()
+                self.outputArea.append(error)
+        
+        def handleError(error):
+            self.statusBar.showMessage(f"Erro no processo: {error}", 5000)
+        
+        process.readyReadStandardOutput.connect(readOutput)
+        process.readyReadStandardError.connect(readError)
+        process.errorOccurred.connect(handleError)
+
     def runSimulation(self):
         if not self.unvFilePath:
             self.statusBar.showMessage("Erro: Nenhum arquivo UNV selecionado", 3000)
@@ -373,6 +538,9 @@ class OpenFOAMInterface(QWidget):
         if not self.currentSolver:
             self.statusBar.showMessage("Erro: Nenhum solver selecionado", 3000)
             return
+        
+        # Limpa o gráfico de resíduos antes de começar nova simulação
+        self.clearResidualPlot()
         
         self.statusBar.showMessage(f"Iniciando simulação com {self.currentSolver}...")
         command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 6 {self.currentSolver} -parallel"'
@@ -387,8 +555,10 @@ class OpenFOAMInterface(QWidget):
         self.currentProcess.finished.connect(finished)
         self.connectProcessSignals(self.currentProcess)
         self.outputArea.append(f"Comando executado: {command}")
-        self.currentProcess.start(command)
-    
+        
+        # Inicia o processo sem bloqueio
+        self.currentProcess.start("bash", ["-l", "-c", command])
+
     def reconstructPar(self):
         if not self.unvFilePath:
             self.statusBar.showMessage("Erro: Nenhum arquivo UNV selecionado", 3000)
@@ -461,11 +631,15 @@ class OpenFOAMInterface(QWidget):
             self.statusBar.showMessage("Nenhuma pasta de decomposição encontrada.", 3000)
     
     def stopSimulation(self):
+        """Para o processo de simulação em execução"""
         if self.currentProcess and self.currentProcess.state() == QProcess.Running:
-            self.currentProcess.terminate()
-            self.statusBar.showMessage("Simulação interrompida", 3000)
+            self.currentProcess.terminate()  # Envia um sinal para encerrar o processo
+            if not self.currentProcess.waitForFinished(3000):  # Aguarda até 3 segundos
+                self.currentProcess.kill()  # Força o encerramento se não responder
+            self.statusBar.showMessage("Simulação interrompida pelo usuário", 3000)
+            self.currentProcess = None
         else:
-            self.statusBar.showMessage("Nenhuma simulação em execução", 3000)
+            self.statusBar.showMessage("Nenhuma simulação em execução para parar", 3000)
     
     def clearTerminal(self):
         self.outputArea.clear()
@@ -531,11 +705,17 @@ class OpenFOAMInterface(QWidget):
         process.setProcessEnvironment(env)
     
     def connectProcessSignals(self, process):
+        """Conecta os sinais do processo para capturar saída e erros"""
         def readOutput():
-            self.outputArea.append(str(process.readAllStandardOutput(), 'utf-8'))
+            while process.canReadLine():
+                output = str(process.readLine(), 'utf-8').strip()
+                self.outputArea.append(output)
+                self.parseResiduals(output)  # Analisa resíduos em tempo real
         
         def readError():
-            self.outputArea.append(str(process.readAllStandardError(), 'utf-8'))
+            while process.canReadLine():
+                error = str(process.readLineStandardError(), 'utf-8').strip()
+                self.outputArea.append(error)
         
         def handleError(error):
             self.statusBar.showMessage(f"Erro no processo: {error}", 5000)
@@ -543,6 +723,30 @@ class OpenFOAMInterface(QWidget):
         process.readyReadStandardOutput.connect(readOutput)
         process.readyReadStandardError.connect(readError)
         process.errorOccurred.connect(handleError)
+
+    def generateMockData(self):
+        """Gera dados fictícios para testar o gráfico de resíduos"""
+        import numpy as np
+
+        # Limpa os dados existentes
+        self.clearResidualPlot()
+
+        # Gera dados fictícios
+        self.timeData = np.linspace(0, 300, 100)  # 100 pontos de tempo entre 0 e 300
+        variables = ['epsilon', 'k', 'Ux', 'Uy']
+        for i, variable in enumerate(variables):
+            residuals = np.exp(-0.01 * self.timeData) * (1 + 0.1 * np.random.randn(len(self.timeData)))
+            self.residualData[variable] = residuals
+
+            # Adiciona a curva ao gráfico
+            color_idx = i % len(self.colors)
+            pen = pg.mkPen(color=self.colors[color_idx], width=2)
+            self.residualLines[variable] = self.graphWidget.plot(
+                self.timeData, residuals, name=variable, pen=pen, symbolBrush=self.colors[color_idx],
+                symbolPen='w', symbol='o', symbolSize=5
+            )
+
+        self.statusBar.showMessage("Dados fictícios gerados para teste do gráfico", 3000)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
