@@ -122,7 +122,7 @@ class OpenFOAMInterface(QWidget):
     
     def setOpenFOAMVersion(self, version):
         self.currentOpenFOAMVersion = version
-        self.statusBar.showMessage(f"Versão selecionada: {version}", 3000)
+        self.outputArea.append(f"Versão selecionada: {version}")
     
     def selectSolver(self):
         solverPath = QFileDialog.getExistingDirectory(
@@ -134,7 +134,7 @@ class OpenFOAMInterface(QWidget):
         if solverPath:
             solverDir = QDir(solverPath)
             self.currentSolver = solverDir.dirName()
-            self.statusBar.showMessage(f"Solver selecionado: {self.currentSolver}", 3000)
+            self.outputArea.append(f"Solver selecionado: {self.currentSolver}")
             self.outputArea.append(f"Solver definido: {self.currentSolver}")
     
     def setupMainContentArea(self):
@@ -275,12 +275,12 @@ class OpenFOAMInterface(QWidget):
         current = self.graphWidget.getViewBox().getState()['logMode'][1]
         self.graphWidget.setLogMode(y=not current)
         scale_type = "logarítmica" if not current else "linear"
-        self.statusBar.showMessage(f"Escala {scale_type} ativada", 2000)
+        self.outputArea.append(f"Escala {scale_type} ativada", 2000)
 
     def exportPlotData(self):
         """Exporta os dados do gráfico para um arquivo CSV"""
         if not self.timeData:
-            self.statusBar.showMessage("Nenhum dado para exportar", 2000)
+            self.outputArea.append("Nenhum dado para exportar", 2000)
             return
             
         fileName, _ = QFileDialog.getSaveFileName(
@@ -302,7 +302,7 @@ class OpenFOAMInterface(QWidget):
                             line += ","
                     f.write(line + "\n")
                     
-            self.statusBar.showMessage(f"Dados exportados para {fileName}", 3000)
+            self.outputArea.append(f"Dados exportados para {fileName}")
         
     def onTreeViewDoubleClicked(self, index):
         item = self.treeModel.itemFromIndex(index)
@@ -314,7 +314,7 @@ class OpenFOAMInterface(QWidget):
                     self.currentFilePath = filePath
                     self.fileEditor.setPlainText(str(file.readAll(), 'utf-8'))
                     file.close()
-                    self.statusBar.showMessage(f"Arquivo carregado: {filePath}", 3000)
+                    self.outputArea.append(f"Arquivo carregado: {filePath}")
     
     def setupStatusBar(self):
         self.statusBar = QStatusBar(self)
@@ -395,7 +395,7 @@ class OpenFOAMInterface(QWidget):
     
     def openParaview(self):
         if not self.unvFilePath:
-            self.statusBar.showMessage("Erro: Nenhum caso selecionado", 3000)
+            self.outputArea.append("Erro: Nenhum caso selecionado")
             return
         
         caseDir = QFileInfo(self.unvFilePath).absolutePath()
@@ -405,9 +405,9 @@ class OpenFOAMInterface(QWidget):
         process.start(command)
         
         if not process.waitForStarted():
-            self.statusBar.showMessage("Erro ao abrir o ParaView", 3000)
+            self.outputArea.append("Erro ao abrir o ParaView")
         else:
-            self.statusBar.showMessage("ParaView iniciado com sucesso", 3000)
+            self.outputArea.append("ParaView iniciado com sucesso")
     
     def chooseUNV(self):
         fileName, _ = QFileDialog.getOpenFileName(
@@ -421,15 +421,15 @@ class OpenFOAMInterface(QWidget):
             self.unvFilePath = fileName
             self.outputArea.append(f"Arquivo UNV escolhido: {fileName}")
             self.meshPathLabel.setText(f"Malha: {QFileInfo(fileName).fileName()}")
-            self.statusBar.showMessage("Malha carregada com sucesso", 3000)
+            self.outputArea.append("Malha carregada.")
             self.populateTreeView(QFileInfo(fileName).absolutePath())
     
     def checkMesh(self):
         if not self.unvFilePath:
-            self.statusBar.showMessage("Erro: Nenhum arquivo UNV selecionado", 3000)
+            self.outputArea.append("Erro: Nenhum arquivo UNV selecionado")
             return
         
-        self.statusBar.showMessage("Executando checkMesh...")
+        self.outputArea.append("Executando checkMesh...")
         command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && checkMesh"'
         
         process = QProcess(self)
@@ -440,10 +440,10 @@ class OpenFOAMInterface(QWidget):
     
     def convertMesh(self):
         if not self.unvFilePath:
-            self.statusBar.showMessage("Erro: Nenhum arquivo UNV selecionado", 3000)
+            self.outputArea.append("Erro: Nenhum arquivo UNV selecionado")
             return
         
-        self.statusBar.showMessage("Convertendo malha para OpenFOAM...")
+        self.outputArea.append("Convertendo malha para OpenFOAM...")
         command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && ideasUnvToFoam {self.unvFilePath}"'
         
         process = QProcess(self)
@@ -524,7 +524,7 @@ class OpenFOAMInterface(QWidget):
                 self.outputArea.append(error)
         
         def handleError(error):
-            self.statusBar.showMessage(f"Erro no processo: {error}", 5000)
+            self.outputArea.append(f"Erro no processo: {error}", 5000)
         
         process.readyReadStandardOutput.connect(readOutput)
         process.readyReadStandardError.connect(readError)
@@ -532,24 +532,24 @@ class OpenFOAMInterface(QWidget):
 
     def runSimulation(self):
         if not self.unvFilePath:
-            self.statusBar.showMessage("Erro: Nenhum arquivo UNV selecionado", 3000)
+            self.outputArea.append("Erro: Nenhum arquivo UNV selecionado")
             return
         
         if not self.currentSolver:
-            self.statusBar.showMessage("Erro: Nenhum solver selecionado", 3000)
+            self.outputArea.append("Erro: Nenhum solver selecionado")
             return
         
         # Limpa o gráfico de resíduos antes de começar nova simulação
         self.clearResidualPlot()
         
-        self.statusBar.showMessage(f"Iniciando simulação com {self.currentSolver}...")
+        self.outputArea.append(f"Iniciando simulação com {self.currentSolver}...")
         command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 6 {self.currentSolver} -parallel"'
         
         self.currentProcess = QProcess(self)
         self.setupProcessEnvironment(self.currentProcess)
         
         def finished(code):
-            self.statusBar.showMessage(f"Simulação finalizada com código {code}", 5000)
+            self.outputArea.append(f"Simulação finalizada com código {code}", 5000)
             self.currentProcess = None
         
         self.currentProcess.finished.connect(finished)
@@ -561,17 +561,17 @@ class OpenFOAMInterface(QWidget):
 
     def reconstructPar(self):
         if not self.unvFilePath:
-            self.statusBar.showMessage("Erro: Nenhum arquivo UNV selecionado", 3000)
+            self.outputArea.append("Erro: Nenhum arquivo UNV selecionado")
             return
         
-        self.statusBar.showMessage("Reconstruindo caso...")
+        self.outputArea.append("Reconstruindo caso...")
         command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && reconstructPar"'
         
         self.currentProcess = QProcess(self)
         self.setupProcessEnvironment(self.currentProcess)
         
         def finished(code):
-            self.statusBar.showMessage(f"Reconstrução finalizada com código {code}", 5000)
+            self.outputArea.append(f"Reconstrução finalizada com código {code}", 5000)
             self.currentProcess = None
         
         self.currentProcess.finished.connect(finished)
@@ -581,10 +581,10 @@ class OpenFOAMInterface(QWidget):
     
     def decomposePar(self):
         if not self.unvFilePath:
-            self.statusBar.showMessage("Erro: Nenhum arquivo UNV selecionado", 3000)
+            self.outputArea.append("Erro: Nenhum arquivo UNV selecionado")
             return
         
-        self.statusBar.showMessage("Executando decomposePar...")
+        self.outputArea.append("Executando decomposePar...")
         command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && decomposePar"'
         
         process = QProcess(self)
@@ -610,9 +610,9 @@ class OpenFOAMInterface(QWidget):
                 pass
         
         if removedAny:
-            self.statusBar.showMessage("Pastas de tempo reconstruídas removidas.", 3000)
+            self.outputArea.append("Pastas de tempo reconstruídas removidas.")
         else:
-            self.statusBar.showMessage("Nenhuma pasta de tempo encontrada.", 3000)
+            self.outputArea.append("Nenhuma pasta de tempo encontrada.")
     
     def clearDecomposedProcessors(self):
         caseDir = QDir("/home/gaf/build-GAFoam-Desktop-Debug")
@@ -626,24 +626,24 @@ class OpenFOAMInterface(QWidget):
                 removedAny = True
         
         if removedAny:
-            self.statusBar.showMessage("Pastas de decomposição removidas.", 3000)
+            self.outputArea.append("Pastas de decomposição removidas.")
         else:
-            self.statusBar.showMessage("Nenhuma pasta de decomposição encontrada.", 3000)
+            self.outputArea.append("Nenhuma pasta de decomposição encontrada.")
     
     def stopSimulation(self):
         """Para o processo de simulação em execução"""
         if self.currentProcess and self.currentProcess.state() == QProcess.Running:
-            self.currentProcess.terminate()  # Envia um sinal para encerrar o processo
-            if not self.currentProcess.waitForFinished(3000):  # Aguarda até 3 segundos
-                self.currentProcess.kill()  # Força o encerramento se não responder
-            self.statusBar.showMessage("Simulação interrompida pelo usuário", 3000)
+            self.currentProcess.terminate() 
+            if not self.currentProcess.waitForFinished(3000):  
+                self.currentProcess.kill()  
+            self.outputArea.append("Simulação interrompida.")
             self.currentProcess = None
         else:
-            self.statusBar.showMessage("Nenhuma simulação em execução para parar", 3000)
+            self.outputArea.append("Nenhuma simulação em execução para parar.")
     
     def clearTerminal(self):
         self.outputArea.clear()
-        self.statusBar.showMessage("Terminal limpo", 2000)
+        self.outputArea.append("Terminal limpo.", 2000)
     
     def editFile(self):
         systemDir = "/home/gaf/build-GAFoam-Desktop-Debug/system"
@@ -697,7 +697,7 @@ class OpenFOAMInterface(QWidget):
             process.start("bash", ["-l", "-c", fullCommand])
             
             firstWord = command.split(' ')[0]
-            self.statusBar.showMessage(f"Comando executado: {firstWord}", 2000)
+            self.outputArea.append(f"Comando executado: {firstWord}", 2000)
     
     def setupProcessEnvironment(self, process):
         env = QProcessEnvironment.systemEnvironment()
@@ -718,7 +718,7 @@ class OpenFOAMInterface(QWidget):
                 self.outputArea.append(error)
         
         def handleError(error):
-            self.statusBar.showMessage(f"Erro no processo: {error}", 5000)
+            self.outputArea.append(f"Erro no processo: {error}", 5000)
         
         process.readyReadStandardOutput.connect(readOutput)
         process.readyReadStandardError.connect(readError)
@@ -746,7 +746,7 @@ class OpenFOAMInterface(QWidget):
                 symbolPen='w', symbol='o', symbolSize=5
             )
 
-        self.statusBar.showMessage("Dados fictícios gerados para teste do gráfico", 3000)
+        self.outputArea.append("Dados fictícios gerados para teste do gráfico")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
