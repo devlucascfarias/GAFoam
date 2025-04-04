@@ -232,11 +232,6 @@ class OpenFOAMInterface(QWidget):
         
         self.clearSimulationButton = QPushButton("Limpar Arquivos de Simulação", self)
         self.clearSimulationButton.clicked.connect(self.clearSimulation)
-        
-        # Botão para calcular Δ y
-        self.calculateRateButton = QPushButton("Calcular Δ y", self)
-        self.calculateRateButton.clicked.connect(self.calculateRates)
-        buttonLayout.addWidget(self.calculateRateButton)
 
         # Adiciona botões ao layout
         buttonLayout.addWidget(self.convertButton)
