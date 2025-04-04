@@ -5,10 +5,12 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5.QtWidgets import (QApplication, QWidget, QWidgetAction, QPushButton, QVBoxLayout, QHBoxLayout, 
                              QFileDialog, QTextEdit, QLabel, QMenuBar, QMenu, QAction, 
-                             QLineEdit, QStatusBar, QTreeView, QComboBox)
+                             QLineEdit, QStatusBar, QTreeView, QComboBox, QDialog)
 from PyQt5.QtCore import QTimer, QProcess, Qt, QDir, QFileInfo, QProcessEnvironment
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QIcon
 from PyQt5 import QtCore
+
+from rate_calculator import calculate_increase_rate
 
 class OpenFOAMInterface(QWidget):
     def __init__(self, parent=None):
@@ -147,7 +149,15 @@ class OpenFOAMInterface(QWidget):
         
         self.openParaviewButton = QPushButton("Abrir no ParaView", self)
         self.openParaviewButton.clicked.connect(self.openParaview)
-        terminalLayout.addWidget(self.openParaviewButton)
+
+        self.calculateRateButton = QPushButton("Calcular Δy", self)
+        self.calculateRateButton.clicked.connect(self.openRateCalculationDialog)
+
+        # Adicionar os botões ao layout
+        buttonRowLayout = QHBoxLayout()
+        buttonRowLayout.addWidget(self.openParaviewButton)
+        buttonRowLayout.addWidget(self.calculateRateButton)
+        terminalLayout.addLayout(buttonRowLayout)
         
         self.outputArea = QTextEdit(self)
         self.outputArea.setReadOnly(True)
@@ -165,6 +175,7 @@ class OpenFOAMInterface(QWidget):
         residualLayout.addWidget(QLabel("Gráfico de Resíduos", self))
         
         self.graphWidget = pg.PlotWidget()
+        self.graphWidget.setBackground('w')
         self.graphWidget.setLabel('left', 'Resíduos')
         self.graphWidget.setLabel('bottom', 'Tempo')
         self.graphWidget.setLogMode(y=True)  
@@ -206,9 +217,11 @@ class OpenFOAMInterface(QWidget):
         self.decomposeParButton.clicked.connect(self.decomposePar)
         
         self.runButton = QPushButton("Rodar Simulação", self)
+        self.runButton.setStyleSheet("background-color: green; color: white; font-weight: bold;")
         self.runButton.clicked.connect(self.runSimulation)
         
         self.stopButton = QPushButton("Parar Simulação", self)
+        self.stopButton.setStyleSheet("background-color: red; color: white; font-weight: bold;")
         self.stopButton.clicked.connect(self.stopSimulation)
         
         self.reconstructButton = QPushButton("Reconstruir", self)
@@ -220,6 +233,11 @@ class OpenFOAMInterface(QWidget):
         self.clearSimulationButton = QPushButton("Limpar Arquivos de Simulação", self)
         self.clearSimulationButton.clicked.connect(self.clearSimulation)
         
+        # Botão para calcular Δ y
+        self.calculateRateButton = QPushButton("Calcular Δ y", self)
+        self.calculateRateButton.clicked.connect(self.calculateRates)
+        buttonLayout.addWidget(self.calculateRateButton)
+
         # Adiciona botões ao layout
         buttonLayout.addWidget(self.convertButton)
         buttonLayout.addWidget(self.decomposeParButton)
@@ -747,6 +765,98 @@ class OpenFOAMInterface(QWidget):
             )
 
         self.outputArea.append("Dados fictícios gerados para teste do gráfico")
+
+    def calculateRates(self):
+        try:
+            # Parâmetros de exemplo
+            d = 0.106
+            n = 30
+            m = 10
+            dy_in_0 = 0.00142
+            dy_wall_0 = 0.008
+
+            results = calculate_increase_rate(d, n, m, dy_in_0, dy_wall_0)
+
+            # Exibir os resultados na área de saída
+            self.outputArea.append("Resultados do cálculo de Δy")
+            for key, value in results.items():
+                self.outputArea.append(f"{key}: {value:.5f}" if isinstance(value, float) else f"{key}: {value}")
+        except Exception as e:
+            self.outputArea.append(f"Erro ao calcular taxas: {str(e)}")
+
+    def openRateCalculationDialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Calcular Δy")
+        dialog.setModal(True)
+        dialog.resize(300, 200)
+
+        layout = QVBoxLayout(dialog)
+
+        # Campos de entrada
+        dLabel = QLabel("d (diâmetro):", dialog)
+        dInput = QLineEdit(dialog)
+        dInput.setPlaceholderText("Exemplo: 0.106")
+
+        nLabel = QLabel("n (distância do bocal):", dialog)
+        nInput = QLineEdit(dialog)
+        nInput.setPlaceholderText("Exemplo: 30")
+
+        mLabel = QLabel("m (distância de transição):", dialog)
+        mInput = QLineEdit(dialog)
+        mInput.setPlaceholderText("Exemplo: 10")
+
+        dyIn0Label = QLabel("dy_in_0 (altura inicial):", dialog)
+        dyIn0Input = QLineEdit(dialog)
+        dyIn0Input.setPlaceholderText("Exemplo: 0.00142")
+
+        dyWall0Label = QLabel("dy_wall_0 (altura na parede):", dialog)
+        dyWall0Input = QLineEdit(dialog)
+        dyWall0Input.setPlaceholderText("Exemplo: 0.008")
+
+        # Botão para calcular
+        calculateButton = QPushButton("Calcular", dialog)
+        calculateButton.clicked.connect(lambda: self.calculateRatesFromDialog(
+            dialog, dInput.text(), nInput.text(), mInput.text(), dyIn0Input.text(), dyWall0Input.text()
+        ))
+
+        # Adicionar widgets ao layout
+        layout.addWidget(dLabel)
+        layout.addWidget(dInput)
+        layout.addWidget(nLabel)
+        layout.addWidget(nInput)
+        layout.addWidget(mLabel)
+        layout.addWidget(mInput)
+        layout.addWidget(dyIn0Label)
+        layout.addWidget(dyIn0Input)
+        layout.addWidget(dyWall0Label)
+        layout.addWidget(dyWall0Input)
+        layout.addWidget(calculateButton)
+
+        dialog.exec_()
+
+    def calculateRatesFromDialog(self, dialog, d, n, m, dy_in_0, dy_wall_0):
+        try:
+            # Converter os valores para float
+            d = float(d)
+            n = float(n)
+            m = float(m)
+            dy_in_0 = float(dy_in_0)
+            dy_wall_0 = float(dy_wall_0)
+
+            # Calcular as taxas
+            results = calculate_increase_rate(d, n, m, dy_in_0, dy_wall_0)
+
+            # Exibir os resultados na área de saída
+            self.outputArea.append("Resultados do cálculo de Δy")
+            for key, value in results.items():
+                self.outputArea.append(f"{key}: {value:.5f}" if isinstance(value, float) else f"{key}: {value}")
+
+            # Fechar o diálogo
+            dialog.accept()
+        except ValueError:
+            self.outputArea.append("Erro: Certifique-se de que todos os valores são números válidos.")
+        except Exception as e:
+            self.outputArea.append(f"Erro ao calcular taxas: {str(e)}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
