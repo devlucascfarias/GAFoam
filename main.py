@@ -74,14 +74,11 @@ class OpenFOAMInterface(QWidget):
         refreshTreeAction = QAction("Atualizar Árvore", self)
         refreshTreeAction.triggered.connect(lambda: self.populateTreeView(QFileInfo(self.unvFilePath).absolutePath() if self.unvFilePath else None))
         
-        checkMeshAction = QAction("Checar Malha", self)
-        checkMeshAction.triggered.connect(self.checkMesh)
         
         importUNVAction = QAction("Importar Arquivo (.unv)", self)
         importUNVAction.triggered.connect(self.chooseUNV)
         
         fileMenu.addAction(refreshTreeAction)
-        fileMenu.addAction(checkMeshAction)
         fileMenu.addAction(importUNVAction)
         
         terminalMenu = QMenu("Terminal", self.menuBar)
@@ -137,7 +134,9 @@ class OpenFOAMInterface(QWidget):
             solverDir = QDir(solverPath)
             self.currentSolver = solverDir.dirName()
             self.outputArea.append(f"Solver selecionado: {self.currentSolver}")
-            self.outputArea.append(f"Solver definido: {self.currentSolver}")
+            self.solverLabel.setText(f"Solver: {self.currentSolver}")  # Atualiza o rótulo do solver
+        else:
+            self.outputArea.append("Nenhum solver selecionado.")
     
     def setupMainContentArea(self):
         contentLayout = QHBoxLayout()
@@ -153,10 +152,14 @@ class OpenFOAMInterface(QWidget):
         self.calculateRateButton = QPushButton("Calcular Δy", self)
         self.calculateRateButton.clicked.connect(self.openRateCalculationDialog)
 
+        self.fluidPropertiesButton = QPushButton("Calcular Propriedades do Fluido", self)
+        self.fluidPropertiesButton.clicked.connect(self.openFluidPropertiesDialog)
+
         # Adicionar os botões ao layout
         buttonRowLayout = QHBoxLayout()
         buttonRowLayout.addWidget(self.openParaviewButton)
         buttonRowLayout.addWidget(self.calculateRateButton)
+        buttonRowLayout.addWidget(self.fluidPropertiesButton)
         terminalLayout.addLayout(buttonRowLayout)
         
         self.outputArea = QTextEdit(self)
@@ -212,9 +215,16 @@ class OpenFOAMInterface(QWidget):
         
         self.convertButton = QPushButton("Converter Malha", self)
         self.convertButton.clicked.connect(self.convertMesh)
+        buttonLayout.addWidget(self.convertButton)
+        
+        # Adicionar o botão "Checar Malha" aqui
+        self.checkMeshButton = QPushButton("Checar Malha", self)
+        self.checkMeshButton.clicked.connect(self.checkMesh)
+        buttonLayout.addWidget(self.checkMeshButton)
         
         self.decomposeParButton = QPushButton("Decompor Núcleos", self)
         self.decomposeParButton.clicked.connect(self.decomposePar)
+        buttonLayout.addWidget(self.decomposeParButton)
         
         self.runButton = QPushButton("Rodar Simulação", self)
         self.runButton.setStyleSheet("background-color: green; color: white; font-weight: bold;")
@@ -333,9 +343,11 @@ class OpenFOAMInterface(QWidget):
         self.statusBar = QStatusBar(self)
         
         self.meshPathLabel = QLabel("Malha: Nenhuma", self.statusBar)
+        self.solverLabel = QLabel("Solver: Nenhum Solver selecionado", self.statusBar)
         self.cpuUsageLabel = QLabel("CPU: --%", self.statusBar)
         self.memUsageLabel = QLabel("Memória: --%", self.statusBar)
-        
+
+        self.statusBar.addPermanentWidget(self.solverLabel, 1)
         self.statusBar.addPermanentWidget(self.meshPathLabel, 1)
         self.statusBar.addPermanentWidget(self.cpuUsageLabel)
         self.statusBar.addPermanentWidget(self.memUsageLabel)
@@ -831,27 +843,114 @@ class OpenFOAMInterface(QWidget):
 
     def calculateRatesFromDialog(self, dialog, d, n, m, dy_in_0, dy_wall_0):
         try:
-            # Converter os valores para float
+            
             d = float(d)
             n = float(n)
             m = float(m)
             dy_in_0 = float(dy_in_0)
             dy_wall_0 = float(dy_wall_0)
 
-            # Calcular as taxas
             results = calculate_increase_rate(d, n, m, dy_in_0, dy_wall_0)
 
-            # Exibir os resultados na área de saída
             self.outputArea.append("Resultados do cálculo de Δy")
             for key, value in results.items():
                 self.outputArea.append(f"{key}: {value:.5f}" if isinstance(value, float) else f"{key}: {value}")
 
-            # Fechar o diálogo
             dialog.accept()
         except ValueError:
             self.outputArea.append("Erro: Certifique-se de que todos os valores são números válidos.")
         except Exception as e:
             self.outputArea.append(f"Erro ao calcular taxas: {str(e)}")
+
+    def openFluidPropertiesDialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Calcular Propriedades do Fluido")
+        dialog.setModal(True)
+        dialog.resize(300, 300)
+
+        layout = QVBoxLayout(dialog)
+
+        # Campos de entrada
+        tempLabel = QLabel("Temperatura (°C):", dialog)
+        tempInput = QLineEdit(dialog)
+        tempInput.setPlaceholderText("Exemplo: 46.6")
+
+        pressureLabel = QLabel("Pressão (MPa):", dialog)
+        pressureInput = QLineEdit(dialog)
+        pressureInput.setPlaceholderText("Exemplo: 9.64")
+
+        salinityLabel = QLabel("Salinidade (mg/L):", dialog)
+        salinityInput = QLineEdit(dialog)
+        salinityInput.setPlaceholderText("Exemplo: 323000")
+
+        # Botão para calcular
+        calculateButton = QPushButton("Calcular", dialog)
+        calculateButton.clicked.connect(lambda: self.calculateFluidProperties(
+            dialog, tempInput.text(), pressureInput.text(), salinityInput.text()
+        ))
+
+        # Adicionar widgets ao layout
+        layout.addWidget(tempLabel)
+        layout.addWidget(tempInput)
+        layout.addWidget(pressureLabel)
+        layout.addWidget(pressureInput)
+        layout.addWidget(salinityLabel)
+        layout.addWidget(salinityInput)
+        layout.addWidget(calculateButton)
+
+        dialog.exec_()
+
+    def calculateFluidProperties(self, dialog, temp, pressure, salinity):
+        try:
+            # Converter entradas para float
+            temp = float(temp)
+            pressure = float(pressure) * 10  # Converter MPa para bar
+            salinity = float(salinity) / 1e6  # Converter mg/L para fração mássica
+
+            # Instanciar a classe de propriedades do fluido
+            fluid = FluidProperties()
+
+            # Calcular propriedades
+            density = fluid.brine_density(temp, pressure, salinity)
+            viscosity = fluid.brine_viscosity(temp, pressure, salinity)
+
+            # Exibir resultados na área de saída
+            self.outputArea.append("Resultados das Propriedades do Fluido:")
+            self.outputArea.append(f"Temperatura: {temp} °C")
+            self.outputArea.append(f"Pressão: {pressure} bar")
+            self.outputArea.append(f"Salinidade: {salinity:.6f} (fração mássica)")
+            self.outputArea.append(f"Densidade: {density:.2f} kg/m³")
+            self.outputArea.append(f"Viscosidade: {viscosity:.6f} Pa.s")
+
+            dialog.accept()
+        except ValueError:
+            self.outputArea.append("Erro: Certifique-se de que todos os valores são números válidos.")
+        except Exception as e:
+            self.outputArea.append(f"Erro ao calcular propriedades: {str(e)}")
+
+class FluidProperties:
+    def __init__(self):
+        # Constantes para densidade da água (Palliser & McKibbin modelo I)
+        self.c0, self.c1, self.c2, self.c3 = 999.84, 0.0679, -0.0085, 0.0001
+        self.A, self.B = 0.51, -0.0002  # Coeficientes de pressão em bar
+
+    def water_density(self, T, P):
+        """Calcula a densidade da água pura (rho_w) em função da temperatura (T) e pressão (P)."""
+        rho_0 = self.c0 + self.c1 * T + self.c2 * T**2 + self.c3 * T**3
+        rho_w = rho_0 + self.A * P + self.B * P**2
+        return rho_w
+
+    def brine_density(self, T, P, X):
+        """Calcula a densidade da salmoura (rho_b) em função de T, P e salinidade (X)."""
+        rho_w_TP = self.water_density(T, P)
+        rho_b = rho_w_TP + X * (1695 - rho_w_TP)
+        return rho_b
+
+    def brine_viscosity(self, T, P, X):
+        """Calcula a viscosidade da salmoura (mu_b) (exemplo simplificado)."""
+        # Aqui você pode implementar o modelo de viscosidade apropriado
+        # Para simplificação, retornamos um valor fixo
+        return 0.001  # Exemplo: viscosidade em Pa.s
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
