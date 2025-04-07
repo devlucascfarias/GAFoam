@@ -11,6 +11,7 @@ from PyQt5.QtGui import QStandardItemModel, QStandardItem, QIcon
 from PyQt5 import QtCore
 
 from rate_calculator import calculate_increase_rate
+from syntax_highlighter import OpenFOAMHighlighter
 
 class OpenFOAMInterface(QWidget):
     def __init__(self, parent=None):
@@ -259,6 +260,7 @@ class OpenFOAMInterface(QWidget):
         editorLayout.addWidget(QLabel("Editor de Arquivo", self))
         
         self.fileEditor = QTextEdit(self)
+        self.highlighter = OpenFOAMHighlighter(self.fileEditor.document())  # Adiciona o destaque de sintaxe
         editorLayout.addWidget(self.fileEditor)
         
         self.editButton = QPushButton("Editar Arquivo", self)
@@ -291,7 +293,7 @@ class OpenFOAMInterface(QWidget):
 
         self.treeUpdateTimer = QTimer(self)
         self.treeUpdateTimer.timeout.connect(lambda: self.populateTreeView())
-        self.treeUpdateTimer.start(5000)  # Atualiza a cada 5 segundos
+        self.treeUpdateTimer.start(1000) 
 
     def toggleLogScale(self):
         """Alterna entre escala linear e logarítmica no eixo Y"""
@@ -948,7 +950,7 @@ class FluidProperties:
 
     def brine_viscosity(self, T, P, X):
         """Calcula a viscosidade da salmoura (mu_b) (exemplo simplificado)."""
-        # Aqui você pode implementar o modelo de viscosidade apropriado
+        # Implementar o modelo de viscosidade apropriado
         # Para simplificação, retornamos um valor fixo
         return 0.001  # Exemplo: viscosidade em Pa.s
 
