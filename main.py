@@ -5,7 +5,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5.QtWidgets import (QApplication, QWidget, QWidgetAction, QPushButton, QVBoxLayout, QHBoxLayout, 
                              QFileDialog, QTextEdit, QLabel, QMenuBar, QMenu, QAction, 
-                             QLineEdit, QStatusBar, QTreeView, QComboBox, QDialog, QTableWidget, QTableWidgetItem)
+                             QLineEdit, QStatusBar, QTreeView, QComboBox, QDialog, QTableWidget, QTableWidgetItem, QMessageBox)
 from PyQt5.QtCore import QTimer, QProcess, Qt, QDir, QFileInfo, QProcessEnvironment
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QIcon
 from PyQt5 import QtCore
@@ -13,6 +13,7 @@ from PyQt5 import QtCore
 from rate_calculator import calculate_increase_rate
 from syntax_highlighter import OpenFOAMHighlighter
 from simulation_history import SimulationHistory
+from datetime import datetime
 
 class OpenFOAMInterface(QWidget):
     def __init__(self, parent=None):
@@ -566,6 +567,8 @@ class OpenFOAMInterface(QWidget):
         process.errorOccurred.connect(handleError)
 
     def runSimulation(self):
+        start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.outputArea.append("Iniciando simulação...")
         if not self.unvFilePath:
             self.outputArea.append("Erro: Nenhum arquivo UNV selecionado")
             return
@@ -593,6 +596,19 @@ class OpenFOAMInterface(QWidget):
         
         # Inicia o processo sem bloqueio
         self.currentProcess.start("bash", ["-l", "-c", command])
+        self.currentProcess.finished.connect(lambda: self.logSimulationCompletion(start_time))
+
+    def logSimulationCompletion(self, start_time):
+        end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        status = "Concluído" if self.currentProcess.exitCode() == 0 else "Interrompida"
+        self.simulationHistory.add_entry(
+            solver=self.currentSolver,
+            case_path=self.unvFilePath,
+            start_time=start_time,
+            end_time=end_time,
+            status=status
+        )
+        self.outputArea.append(f"Simulação {status}.")
 
     def reconstructPar(self):
         if not self.unvFilePath:
@@ -945,22 +961,67 @@ class OpenFOAMInterface(QWidget):
 
         layout = QVBoxLayout(dialog)
 
-        table = QTableWidget(dialog)
-        table.setColumnCount(5)
-        table.setHorizontalHeaderLabels(["Solver", "Caminho do Caso", "Início", "Fim", "Status"])
-        history = self.simulationHistory.get_history()
-        table.setRowCount(len(history))
+        # Tabela de histórico
+        self.historyTable = QTableWidget(dialog)
+        self.historyTable.setColumnCount(5)
+        self.historyTable.setHorizontalHeaderLabels(["Solver", "Caminho do Caso", "Início", "Fim", "Status"])
+        self.loadHistoryIntoTable()
+        layout.addWidget(self.historyTable)
 
-        for row, entry in enumerate(history):
-            table.setItem(row, 0, QTableWidgetItem(entry["solver"]))
-            table.setItem(row, 1, QTableWidgetItem(entry["case_path"]))
-            table.setItem(row, 2, QTableWidgetItem(entry["start_time"]))
-            table.setItem(row, 3, QTableWidgetItem(entry["end_time"]))
-            table.setItem(row, 4, QTableWidgetItem(entry["status"]))
+        # Botões
+        buttonLayout = QHBoxLayout()
+        
+        clearAllButton = QPushButton("Limpar Tudo", dialog)
+        clearAllButton.clicked.connect(self.clearAllSimulations)
+        buttonLayout.addWidget(clearAllButton)
 
-        layout.addWidget(table)
+        deleteSelectedButton = QPushButton("Excluir Selecionado", dialog)
+        deleteSelectedButton.clicked.connect(self.deleteSelectedSimulation)
+        buttonLayout.addWidget(deleteSelectedButton)
+
+        layout.addLayout(buttonLayout)
         dialog.setLayout(layout)
         dialog.exec_()
+
+    def loadHistoryIntoTable(self):
+        """Carrega o histórico na tabela."""
+        history = self.simulationHistory.get_history()
+        self.historyTable.setRowCount(len(history))
+        for row, entry in enumerate(history):
+            self.historyTable.setItem(row, 0, QTableWidgetItem(entry["solver"]))
+            self.historyTable.setItem(row, 1, QTableWidgetItem(entry["case_path"]))
+            self.historyTable.setItem(row, 2, QTableWidgetItem(entry["start_time"]))
+            self.historyTable.setItem(row, 3, QTableWidgetItem(entry["end_time"]))
+            self.historyTable.setItem(row, 4, QTableWidgetItem(entry["status"]))
+
+    def clearAllSimulations(self):
+        """Limpa todo o histórico de simulações."""
+        reply = QMessageBox.question(
+            self, "Confirmação", "Tem certeza de que deseja limpar todo o histórico?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.simulationHistory.history = []  # Limpa o histórico na memória
+            self.simulationHistory.save_history()  # Salva o histórico vazio no arquivo
+            self.loadHistoryIntoTable()  # Atualiza a tabela
+            QMessageBox.information(self, "Histórico Limpo", "Todo o histórico foi limpo com sucesso.")
+
+    def deleteSelectedSimulation(self):
+        """Exclui a simulação selecionada na tabela."""
+        selectedRow = self.historyTable.currentRow()
+        if selectedRow == -1:
+            QMessageBox.warning(self, "Nenhuma Seleção", "Por favor, selecione uma simulação para excluir.")
+            return
+
+        reply = QMessageBox.question(
+            self, "Confirmação", "Tem certeza de que deseja excluir a simulação selecionada?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            del self.simulationHistory.history[selectedRow]  # Remove a entrada do histórico
+            self.simulationHistory.save_history()  # Salva as alterações no arquivo
+            self.loadHistoryIntoTable()  # Atualiza a tabela
+            QMessageBox.information(self, "Simulação Excluída", "A simulação selecionada foi excluída com sucesso.")
 
 class FluidProperties:
     def __init__(self):
