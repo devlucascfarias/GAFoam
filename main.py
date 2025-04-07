@@ -5,13 +5,14 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5.QtWidgets import (QApplication, QWidget, QWidgetAction, QPushButton, QVBoxLayout, QHBoxLayout, 
                              QFileDialog, QTextEdit, QLabel, QMenuBar, QMenu, QAction, 
-                             QLineEdit, QStatusBar, QTreeView, QComboBox, QDialog)
+                             QLineEdit, QStatusBar, QTreeView, QComboBox, QDialog, QTableWidget, QTableWidgetItem)
 from PyQt5.QtCore import QTimer, QProcess, Qt, QDir, QFileInfo, QProcessEnvironment
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QIcon
 from PyQt5 import QtCore
 
 from rate_calculator import calculate_increase_rate
 from syntax_highlighter import OpenFOAMHighlighter
+from simulation_history import SimulationHistory
 
 class OpenFOAMInterface(QWidget):
     def __init__(self, parent=None):
@@ -43,6 +44,7 @@ class OpenFOAMInterface(QWidget):
         self.systemMonitorTimer.start(2000)
         
         self.setLayout(self.mainVerticalLayout)
+        self.simulationHistory = SimulationHistory()
     
     def detectOpenFOAMVersions(self):
         versions = []
@@ -117,6 +119,12 @@ class OpenFOAMInterface(QWidget):
         self.menuBar.addMenu(terminalMenu)
         self.menuBar.addMenu(openfoamMenu)
         self.menuBar.addMenu(solverMenu)
+        
+        historyMenu = QMenu("Histórico", self.menuBar)
+        viewHistoryAction = QAction("Ver Histórico de Simulações", self)
+        viewHistoryAction.triggered.connect(self.openSimulationHistory)
+        historyMenu.addAction(viewHistoryAction)
+        self.menuBar.addMenu(historyMenu)
         
         self.mainVerticalLayout.setMenuBar(self.menuBar)
     
@@ -345,7 +353,7 @@ class OpenFOAMInterface(QWidget):
         self.statusBar = QStatusBar(self)
         
         self.meshPathLabel = QLabel("Malha: Nenhuma", self.statusBar)
-        self.solverLabel = QLabel("Solver: Nenhum Solver selecionado", self.statusBar)
+        self.solverLabel = QLabel(f"Solver: {self.currentSolver}", self.statusBar)
         self.cpuUsageLabel = QLabel("CPU: --%", self.statusBar)
         self.memUsageLabel = QLabel("Memória: --%", self.statusBar)
 
@@ -929,6 +937,30 @@ class OpenFOAMInterface(QWidget):
             self.outputArea.append("Erro: Certifique-se de que todos os valores são números válidos.")
         except Exception as e:
             self.outputArea.append(f"Erro ao calcular propriedades: {str(e)}")
+
+    def openSimulationHistory(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Histórico de Simulações")
+        dialog.resize(800, 400)
+
+        layout = QVBoxLayout(dialog)
+
+        table = QTableWidget(dialog)
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels(["Solver", "Caminho do Caso", "Início", "Fim", "Status"])
+        history = self.simulationHistory.get_history()
+        table.setRowCount(len(history))
+
+        for row, entry in enumerate(history):
+            table.setItem(row, 0, QTableWidgetItem(entry["solver"]))
+            table.setItem(row, 1, QTableWidgetItem(entry["case_path"]))
+            table.setItem(row, 2, QTableWidgetItem(entry["start_time"]))
+            table.setItem(row, 3, QTableWidgetItem(entry["end_time"]))
+            table.setItem(row, 4, QTableWidgetItem(entry["status"]))
+
+        layout.addWidget(table)
+        dialog.setLayout(layout)
+        dialog.exec_()
 
 class FluidProperties:
     def __init__(self):
