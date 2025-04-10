@@ -28,10 +28,11 @@ class OpenFOAMInterface(QWidget):
         self.currentProcess = None
         
         # Dados para gráfico de resíduos
+
         self.residualData = {}
         self.timeData = []
         self.residualLines = {}
-        self.colors = ['r', 'g', 'b', 'c', 'm', 'y', 'w']  # Cores para diferentes variáveis
+        self.colors = ['r', 'g', 'b', 'c', 'm', 'y', 'w'] 
         
         self.mainVerticalLayout = QVBoxLayout(self)
         self.mainVerticalLayout.setContentsMargins(5, 5, 5, 5)
@@ -69,7 +70,45 @@ class OpenFOAMInterface(QWidget):
             processorDir = QDir(caseDir.filePath(dirName))
             if processorDir.removeRecursively():
                 self.outputArea.append(f"Removendo pasta antiga: {dirName}")
+
+    def chooseUNV(self):
+        unvFilePath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Escolher Arquivo .unv",
+            "",
+            "Arquivos UNV (*.unv)"
+        )
+        
+        if unvFilePath:
+            self.unvFilePath = unvFilePath
+            self.outputArea.append(f"Arquivo .unv carregado: {unvFilePath}")
+            self.meshPathLabel.setText(f"Malha: {QFileInfo(unvFilePath).fileName()}")
+        else:
+            self.outputArea.append("Nenhum arquivo .unv foi selecionado.")    
     
+    def chooseCase(self):
+        casePath = QFileDialog.getExistingDirectory(
+            self, 
+            "Escolher Pasta do Caso", 
+            "", 
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+        
+        if casePath:
+            # Verifica se a pasta contém os diretórios necessários
+            required_dirs = ["0", "system", "constant"]
+            if all(QDir(casePath).exists(dir_name) for dir_name in required_dirs):
+                self.unvFilePath = casePath  # Atualiza o caminho do caso
+                self.outputArea.append(f"Pasta do caso escolhida: {casePath}")
+                self.meshPathLabel.setText(f"Malha: {QFileInfo(casePath).fileName()}")
+                self.outputArea.append("Caso carregado com sucesso.")
+                self.populateTreeView(casePath)  # Atualiza a árvore de diretórios
+            else:
+                self.outputArea.append("Erro: A pasta selecionada não contém os diretórios necessários (0, system, constant).")
+        else:
+            self.outputArea.append("Nenhuma pasta foi selecionada.")
+    
+    # Atualize o menu para refletir a nova funcionalidade
     def setupMenuBar(self):
         self.menuBar = QMenuBar(self)
         
@@ -78,12 +117,18 @@ class OpenFOAMInterface(QWidget):
         refreshTreeAction = QAction("Atualizar Árvore", self)
         refreshTreeAction.triggered.connect(lambda: self.populateTreeView(QFileInfo(self.unvFilePath).absolutePath() if self.unvFilePath else None))
         
-        
-        importUNVAction = QAction("Importar Arquivo (.unv)", self)
+        importUNVAction = QAction("Carregar Arquivo .unv", self)
         importUNVAction.triggered.connect(self.chooseUNV)
+        
+        importCaseAction = QAction("Carregar Caso", self)
+        importCaseAction.triggered.connect(self.chooseCase)
         
         fileMenu.addAction(refreshTreeAction)
         fileMenu.addAction(importUNVAction)
+        fileMenu.addAction(importCaseAction)
+        
+        self.menuBar.addMenu(fileMenu)
+        self.mainVerticalLayout.setMenuBar(self.menuBar)
         
         terminalMenu = QMenu("Terminal", self.menuBar)
         
@@ -141,10 +186,35 @@ class OpenFOAMInterface(QWidget):
         )
         
         if solverPath:
-            solverDir = QDir(solverPath)
-            self.currentSolver = solverDir.dirName()
-            self.outputArea.append(f"Solver selecionado: {self.currentSolver}")
-            self.solverLabel.setText(f"Solver: {self.currentSolver}")  # Atualiza o rótulo do solver
+            solverName = QFileInfo(solverPath).fileName()
+            self.currentSolver = solverName
+            self.solverLabel.setText(f"Solver: {solverName}")
+            self.outputArea.append(f"Solver selecionado: {solverName}")
+            
+            # Atualiza o controlDict com o novo solver
+            controlDictPath = "/home/gaf/build-GAFoam-Desktop-Debug/system/controlDict"
+            try:
+                with open(controlDictPath, "r") as file:
+                    content = file.read()
+                
+                # Substitui a linha de solver com expressão regular
+                import re
+                updated_content = re.sub(
+                    r'(solver\s+)([^;]*)(;)',
+                    rf'\1{solverName}\3',
+                    content
+                )
+                
+                with open(controlDictPath, "w") as file:
+                    file.write(updated_content)
+                    
+                self.outputArea.append(f"Arquivo controlDict atualizado para usar o solver {solverName}.")
+                
+                # Atualiza a árvore de arquivos para refletir a mudança
+                self.populateTreeView(QFileInfo(self.unvFilePath).absolutePath() if self.unvFilePath else None)
+                
+            except Exception as e:
+                self.outputArea.append(f"Erro ao atualizar o controlDict: {str(e)}")
         else:
             self.outputArea.append("Nenhum solver selecionado.")
     
@@ -165,7 +235,6 @@ class OpenFOAMInterface(QWidget):
         self.fluidPropertiesButton = QPushButton("Calcular Propriedades do Fluido", self)
         self.fluidPropertiesButton.clicked.connect(self.openFluidPropertiesDialog)
 
-        # Adicionar os botões ao layout
         buttonRowLayout = QHBoxLayout()
         buttonRowLayout.addWidget(self.openParaviewButton)
         buttonRowLayout.addWidget(self.calculateRateButton)
@@ -183,7 +252,8 @@ class OpenFOAMInterface(QWidget):
         
         leftContentLayout.addLayout(terminalLayout)
         
-        # Adicionar gráfico de resíduos
+        # Gráfico de resíduos
+        
         residualLayout = QVBoxLayout()
         residualLayout.addWidget(QLabel("Gráfico de Resíduos", self))
         
@@ -201,25 +271,17 @@ class OpenFOAMInterface(QWidget):
         self.clearPlotButton = QPushButton("Limpar Gráfico", self)
         self.clearPlotButton.clicked.connect(self.clearResidualPlot)
 
-        self.toggleLogScaleButton = QPushButton("Alternar Escala Log", self)
-        self.toggleLogScaleButton.clicked.connect(self.toggleLogScale)  
-
         self.exportPlotDataButton = QPushButton("Exportar Dados", self)
         self.exportPlotDataButton.clicked.connect(self.exportPlotData)  
 
         graphControlLayout.addWidget(self.clearPlotButton)
-        graphControlLayout.addWidget(self.toggleLogScaleButton)
         graphControlLayout.addWidget(self.exportPlotDataButton)
-
-        self.mockDataButton = QPushButton("Gerar Dados Fictícios", self)
-        self.mockDataButton.clicked.connect(self.generateMockData)
-        graphControlLayout.addWidget(self.mockDataButton)
 
         residualLayout.addLayout(graphControlLayout)
         
         leftContentLayout.addLayout(residualLayout)
         
-        # Botões
+        # Área dos botões
 
         buttonLayout = QVBoxLayout()
         
@@ -227,7 +289,6 @@ class OpenFOAMInterface(QWidget):
         self.convertButton.clicked.connect(self.convertMesh)
         buttonLayout.addWidget(self.convertButton)
         
-        # Adicionar o botão "Checar Malha" aqui
         self.checkMeshButton = QPushButton("Checar Malha", self)
         self.checkMeshButton.clicked.connect(self.checkMesh)
         buttonLayout.addWidget(self.checkMeshButton)
@@ -253,7 +314,6 @@ class OpenFOAMInterface(QWidget):
         self.clearSimulationButton = QPushButton("Limpar Arquivos de Simulação", self)
         self.clearSimulationButton.clicked.connect(self.clearSimulation)
 
-        # Adiciona botões ao layout
         buttonLayout.addWidget(self.convertButton)
         buttonLayout.addWidget(self.decomposeParButton)
         buttonLayout.addWidget(self.runButton)
@@ -269,7 +329,7 @@ class OpenFOAMInterface(QWidget):
         editorLayout.addWidget(QLabel("Editor de Arquivo", self))
         
         self.fileEditor = QTextEdit(self)
-        self.highlighter = OpenFOAMHighlighter(self.fileEditor.document())  # Adiciona o destaque de sintaxe
+        self.highlighter = OpenFOAMHighlighter(self.fileEditor.document()) 
         editorLayout.addWidget(self.fileEditor)
         
         self.editButton = QPushButton("Editar Arquivo", self)
@@ -281,9 +341,14 @@ class OpenFOAMInterface(QWidget):
         editorLayout.addWidget(self.editButton)
         editorLayout.addWidget(self.saveButton)
         
-        # Árvore de diretórios (direita)
+        # Área de diretórios com barra de pesquisa
         treeLayout = QVBoxLayout()
         treeLayout.addWidget(QLabel("Diretórios", self))
+        
+        self.searchBar = QLineEdit(self)
+        self.searchBar.setPlaceholderText("Pesquisar arquivos...")
+        self.searchBar.textChanged.connect(self.filterTreeView)
+        treeLayout.addWidget(self.searchBar)
         
         self.treeView = QTreeView(self)
         self.treeModel = QStandardItemModel(self)
@@ -293,7 +358,6 @@ class OpenFOAMInterface(QWidget):
         
         treeLayout.addWidget(self.treeView)
         
-        # Adiciona os layouts ao layout principal
         contentLayout.addLayout(leftContentLayout, 3)
         contentLayout.addLayout(editorLayout, 1)
         contentLayout.addLayout(treeLayout, 1)
@@ -445,21 +509,6 @@ class OpenFOAMInterface(QWidget):
         else:
             self.outputArea.append("ParaView iniciado com sucesso")
     
-    def chooseUNV(self):
-        fileName, _ = QFileDialog.getOpenFileName(
-            self, 
-            "Escolher Arquivo UNV", 
-            "", 
-            "Arquivos UNV (*.unv)"
-        )
-        
-        if fileName:
-            self.unvFilePath = fileName
-            self.outputArea.append(f"Arquivo UNV escolhido: {fileName}")
-            self.meshPathLabel.setText(f"Malha: {QFileInfo(fileName).fileName()}")
-            self.outputArea.append("Malha carregada.")
-            self.populateTreeView(QFileInfo(fileName).absolutePath())
-    
     def checkMesh(self):
         if not self.unvFilePath:
             self.outputArea.append("Erro: Nenhum arquivo UNV selecionado")
@@ -488,56 +537,56 @@ class OpenFOAMInterface(QWidget):
         self.outputArea.append(f"Comando executado: {command}")
         process.start(command)
     
-    def parseResiduals(self, text):
-        """Analisa o texto de saída para extrair dados de resíduos"""
-        lines = text.strip().split('\n')
-        current_time = None
-        
-        for line in lines:
-            # Captura o tempo atual
-            time_match = re.search(r'Time\s*=\s*([0-9.e+-]+)', line)
-            if time_match:
-                current_time = float(time_match.group(1))
-                if current_time not in self.timeData:
-                    self.timeData.append(current_time)
-                    self.outputArea.append(f"Tempo detectado: {current_time}")
-                continue
-            
-            # Captura resíduos iniciais no formato do OpenFOAM
-            # Exemplo: "smoothSolver:  Solving for Ux, Initial residual = 1, Final residual = 4.60944e-08, No Iterations 6"
-            # Ou: "GAMG:  Solving for p_rgh, Initial residual = 1, Final residual = 0.0094947, No Iterations 59"
-            residual_match = re.search(r'(?:smoothSolver|GAMG|PCG|PBiCGStab):\s+Solving for ([a-zA-Z0-9_]+), Initial residual = ([0-9.e+-]+)', line)
-            if residual_match and current_time is not None:
-                variable = residual_match.group(1)
-                residual = float(residual_match.group(2))
-                
-                if variable not in self.residualData:
-                    self.residualData[variable] = []
-                    color_idx = len(self.residualData) % len(self.colors)
-                    pen = pg.mkPen(color=self.colors[color_idx], width=2)
-                    self.residualLines[variable] = self.graphWidget.plot(
-                        [], [], name=variable, pen=pen, symbolBrush=self.colors[color_idx], 
-                        symbolPen='w', symbol='o', symbolSize=5
-                    )
-                    self.outputArea.append(f"Nova variável detectada: {variable}")
-                    
-                # Certifica-se de que os dados têm o mesmo comprimento
-                while len(self.residualData[variable]) < len(self.timeData) - 1:
-                    self.residualData[variable].append(None)
-                
-                self.residualData[variable].append(residual)
-                
-                # Atualiza o gráfico
-                self.updateResidualPlot(variable)
-    
+    def parseResiduals(self, line):
+        """Analisa a saída do terminal para capturar resíduos e tempos."""
+        # Captura o tempo atual
+        current_time_match = re.search(r'Time = ([0-9.e+-]+)', line)
+        if current_time_match:
+            current_time = float(current_time_match.group(1))
+            if current_time not in self.timeData:
+                self.timeData.append(current_time)
+
+        # Captura os resíduos
+        residual_match = re.search(r'(?:DILUPBiCGStab|GAMG|diagonal):\s+Solving for ([a-zA-Z0-9_]+), Initial residual = ([0-9.e+-]+)', line)
+        if residual_match:
+            variable = residual_match.group(1)
+            residual = float(residual_match.group(2))
+
+            # Inicializa os dados da variável, se necessário
+            if variable not in self.residualData:
+                self.residualData[variable] = []
+                color_idx = len(self.residualData) % len(self.colors)
+                pen = pg.mkPen(color=self.colors[color_idx], width=2)
+                self.residualLines[variable] = self.graphWidget.plot(
+                    [], [], name=variable, pen=pen, symbolBrush=self.colors[color_idx], 
+                    symbolPen='w', symbol='o', symbolSize=5
+                )
+
+            # Preenche valores ausentes com None para sincronizar com o tempo
+            while len(self.residualData[variable]) < len(self.timeData) - 1:
+                self.residualData[variable].append(None)
+
+            # Adiciona o novo resíduo
+            self.residualData[variable].append(residual)
+
+            # Garante que os tamanhos sejam iguais
+            while len(self.residualData[variable]) > len(self.timeData):
+                self.timeData.append(None)
+
+            # Atualiza o gráfico
+            self.updateResidualPlot(variable)
+
     def updateResidualPlot(self, variable):
-        """Atualiza o gráfico de resíduos para a variável especificada"""
-        if variable in self.residualLines and variable in self.residualData:
-            valid_data = [(time, res) for time, res in zip(self.timeData, self.residualData[variable]) 
-                         if res is not None]
-            if valid_data:
-                x_data, y_data = zip(*valid_data)
-                self.residualLines[variable].setData(x_data, y_data)
+        """Atualiza o gráfico de resíduos para uma variável específica."""
+        if variable in self.residualLines:
+            # Filtra os valores None antes de atualizar o gráfico
+            filtered_time_data = [t for t, r in zip(self.timeData, self.residualData[variable]) if r is not None]
+            filtered_residual_data = [r for r in self.residualData[variable] if r is not None]
+
+            if filtered_time_data and filtered_residual_data:
+                self.residualLines[variable].setData(filtered_time_data, filtered_residual_data)
+            else:
+                self.outputArea.append(f"Dados insuficientes para atualizar o gráfico de {variable}.")
 
     def clearResidualPlot(self):
         """Limpa o gráfico de resíduos"""
@@ -547,54 +596,57 @@ class OpenFOAMInterface(QWidget):
         self.residualLines = {}
 
     def connectProcessSignals(self, process):
-        """Conecta os sinais do processo para capturar saída e erros"""
+        """Conecta os sinais do processo para capturar saída e atualizar resíduos."""
         def readOutput():
             while process.canReadLine():
                 output = str(process.readLine(), 'utf-8').strip()
                 self.outputArea.append(output)
-                self.parseResiduals(output)  # Analisa resíduos em tempo real
-        
+                self.parseResiduals(output)
+                QApplication.processEvents()  # Força a atualização da interface
+
         def readError():
-            while process.canReadLine():
-                error = str(process.readLineStandardError(), 'utf-8').strip()
-                self.outputArea.append(error)
-        
-        def handleError(error):
-            self.outputArea.append(f"Erro no processo: {error}", 5000)
-        
+            error = str(process.readAllStandardError(), 'utf-8').strip()
+            self.outputArea.append(error)
+
         process.readyReadStandardOutput.connect(readOutput)
         process.readyReadStandardError.connect(readError)
-        process.errorOccurred.connect(handleError)
 
-    def runSimulation(self):
+    # Atualize o método runSimulation para verificar se o caso é válido
         start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.outputArea.append("Iniciando simulação...")
-        if not self.unvFilePath:
-            self.outputArea.append("Erro: Nenhum arquivo UNV selecionado")
-            return
         
+        if not self.unvFilePath:
+            self.outputArea.append("Erro: Nenhum caso selecionado")
+            return
+
+        # Verifica se é uma pasta de caso válida
+        required_dirs = ["0", "system", "constant"]
+        if not all(QDir(self.unvFilePath).exists(dir_name) for dir_name in required_dirs):
+            self.outputArea.append("Erro: A pasta selecionada não contém os diretórios necessários (0, system, constant).")
+            return
+
         if not self.currentSolver:
             self.outputArea.append("Erro: Nenhum solver selecionado")
             return
-        
-        # Limpa o gráfico de resíduos antes de começar nova simulação
+
         self.clearResidualPlot()
-        
-        self.outputArea.append(f"Iniciando simulação com {self.currentSolver}...")
+
         command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 6 {self.currentSolver} -parallel"'
-        
+
+        self.outputArea.append(f"Iniciando simulação com {self.currentSolver}...")
         self.currentProcess = QProcess(self)
         self.setupProcessEnvironment(self.currentProcess)
-        
+
         def finished(code):
-            self.outputArea.append(f"Simulação finalizada com código {code}", 5000)
-            self.currentProcess = None
-        
+            if code == 0:
+                self.outputArea.append("Simulação concluída com sucesso.")
+            else:
+                self.outputArea.append(f"Simulação finalizada com código de erro: {code}")
+
         self.currentProcess.finished.connect(finished)
         self.connectProcessSignals(self.currentProcess)
         self.outputArea.append(f"Comando executado: {command}")
-        
-        # Inicia o processo sem bloqueio
+
         self.currentProcess.start("bash", ["-l", "-c", command])
         self.currentProcess.finished.connect(lambda: self.logSimulationCompletion(start_time))
 
@@ -632,17 +684,33 @@ class OpenFOAMInterface(QWidget):
     
     def decomposePar(self):
         if not self.unvFilePath:
-            self.outputArea.append("Erro: Nenhum arquivo UNV selecionado")
+            self.outputArea.append("Erro: Nenhum caso selecionado.")
             return
-        
-        self.outputArea.append("Executando decomposePar...")
+
+        # Verifica se a pasta do caso contém os diretórios necessários
+        required_dirs = ["0", "system", "constant"]
+        if not all(QDir(self.unvFilePath).exists(dir_name) for dir_name in required_dirs):
+            self.outputArea.append("Erro: A pasta selecionada não contém os diretórios necessários (0, system, constant).")
+            return
+
+        self.outputArea.append("Iniciando decomposição dos núcleos...")
         command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && decomposePar"'
-        
-        process = QProcess(self)
-        self.setupProcessEnvironment(process)
-        self.connectProcessSignals(process)
-        self.outputArea.append(f"Comando executado: {command}")
-        process.start(command)
+
+        self.currentProcess = QProcess(self)
+        self.setupProcessEnvironment(self.currentProcess)
+
+        # Define a pasta do caso como diretório de trabalho
+        self.currentProcess.setWorkingDirectory(self.unvFilePath)
+
+        def finished(code):
+            if code == 0:
+                self.outputArea.append("Decomposição concluída com sucesso.")
+            else:
+                self.outputArea.append(f"Erro na decomposição: código {code}")
+
+        self.currentProcess.finished.connect(finished)
+        self.connectProcessSignals(self.currentProcess)
+        self.currentProcess.start("bash", ["-l", "-c", command])
     
     def clearSimulation(self):
         caseDir = QDir("/home/gaf/build-GAFoam-Desktop-Debug")
@@ -664,20 +732,73 @@ class OpenFOAMInterface(QWidget):
             self.outputArea.append("Pastas de tempo reconstruídas removidas.")
         else:
             self.outputArea.append("Nenhuma pasta de tempo encontrada.")
+
+    def runSimulation(self):
+        start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.outputArea.append("Iniciando simulação...")
+        
+        if not self.unvFilePath:
+            self.outputArea.append("Erro: Nenhum caso ou arquivo .unv selecionado.")
+            return
+
+        # Verifica se é uma pasta de caso válida
+        if QDir(self.unvFilePath).exists("0") and QDir(self.unvFilePath).exists("system") and QDir(self.unvFilePath).exists("constant"):
+            casePath = self.unvFilePath
+        elif self.unvFilePath.endswith(".unv"):
+            casePath = QFileInfo(self.unvFilePath).absolutePath()
+        else:
+            self.outputArea.append("Erro: O caminho selecionado não é válido.")
+            return
+
+        if not self.currentSolver:
+            self.outputArea.append("Erro: Nenhum solver selecionado.")
+            return
+
+        self.clearResidualPlot()
+
+        # Comando para rodar a simulação
+        if self.currentOpenFOAMVersion == "openfoam12":
+            command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 6 foamRun -parallel"'
+        else:
+            command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 6 {self.currentSolver} -parallel"'
+
+        self.outputArea.append(f"Iniciando simulação com {self.currentSolver}...")
+        self.currentProcess = QProcess(self)
+        self.setupProcessEnvironment(self.currentProcess)
+
+        # Define a pasta do caso como diretório de trabalho
+        self.currentProcess.setWorkingDirectory(casePath)
+
+        def finished(code):
+            if code == 0:
+                self.outputArea.append("Simulação concluída com sucesso.")
+            else:
+                self.outputArea.append(f"Erro na simulação: código {code}")
+
+        self.currentProcess.finished.connect(finished)
+        self.connectProcessSignals(self.currentProcess)
+        self.outputArea.append(f"Comando executado: {command}")
+
+        self.currentProcess.start("bash", ["-l", "-c", command])
+        self.currentProcess.finished.connect(lambda: self.logSimulationCompletion(start_time))
     
     def clearDecomposedProcessors(self):
-        caseDir = QDir("/home/gaf/build-GAFoam-Desktop-Debug")
+        if not self.unvFilePath:
+            self.outputArea.append("Erro: Nenhum caso selecionado.")
+            return
+
+        caseDir = QDir(self.unvFilePath)
         processorDirs = caseDir.entryList(["processor*"], QDir.Dirs | QDir.NoDotAndDotDot)
         removedAny = False
-        
+
         for dirName in processorDirs:
             processorDir = QDir(caseDir.filePath(dirName))
             if processorDir.removeRecursively():
                 self.outputArea.append(f"Removendo pasta: {dirName}")
                 removedAny = True
-        
+
         if removedAny:
-            self.outputArea.append("Pastas de decomposição removidas.")
+            self.outputArea.append("Pastas de decomposição removidas com sucesso.")
         else:
             self.outputArea.append("Nenhuma pasta de decomposição encontrada.")
     
@@ -756,48 +877,22 @@ class OpenFOAMInterface(QWidget):
         process.setProcessEnvironment(env)
     
     def connectProcessSignals(self, process):
-        """Conecta os sinais do processo para capturar saída e erros"""
+        """Conecta os sinais do processo para capturar saída e atualizar resíduos."""
         def readOutput():
             while process.canReadLine():
                 output = str(process.readLine(), 'utf-8').strip()
                 self.outputArea.append(output)
-                self.parseResiduals(output)  # Analisa resíduos em tempo real
-        
+                self.parseResiduals(output)
+                QApplication.processEvents() 
+
         def readError():
             while process.canReadLine():
                 error = str(process.readLineStandardError(), 'utf-8').strip()
                 self.outputArea.append(error)
-        
-        def handleError(error):
-            self.outputArea.append(f"Erro no processo: {error}", 5000)
-        
+
         process.readyReadStandardOutput.connect(readOutput)
         process.readyReadStandardError.connect(readError)
-        process.errorOccurred.connect(handleError)
 
-    def generateMockData(self):
-        """Gera dados fictícios para testar o gráfico de resíduos"""
-        import numpy as np
-
-        # Limpa os dados existentes
-        self.clearResidualPlot()
-
-        # Gera dados fictícios
-        self.timeData = np.linspace(0, 300, 100)  # 100 pontos de tempo entre 0 e 300
-        variables = ['epsilon', 'k', 'Ux', 'Uy']
-        for i, variable in enumerate(variables):
-            residuals = np.exp(-0.01 * self.timeData) * (1 + 0.1 * np.random.randn(len(self.timeData)))
-            self.residualData[variable] = residuals
-
-            # Adiciona a curva ao gráfico
-            color_idx = i % len(self.colors)
-            pen = pg.mkPen(color=self.colors[color_idx], width=2)
-            self.residualLines[variable] = self.graphWidget.plot(
-                self.timeData, residuals, name=variable, pen=pen, symbolBrush=self.colors[color_idx],
-                symbolPen='w', symbol='o', symbolSize=5
-            )
-
-        self.outputArea.append("Dados fictícios gerados para teste do gráfico")
 
     def calculateRates(self):
         try:
@@ -928,19 +1023,15 @@ class OpenFOAMInterface(QWidget):
 
     def calculateFluidProperties(self, dialog, temp, pressure, salinity):
         try:
-            # Converter entradas para float
             temp = float(temp)
-            pressure = float(pressure) * 10  # Converter MPa para bar
-            salinity = float(salinity) / 1e6  # Converter mg/L para fração mássica
+            pressure = float(pressure) * 10
+            salinity = float(salinity) / 1e6 
 
-            # Instanciar a classe de propriedades do fluido
             fluid = FluidProperties()
 
-            # Calcular propriedades
             density = fluid.brine_density(temp, pressure, salinity)
             viscosity = fluid.brine_viscosity(temp, pressure, salinity)
 
-            # Exibir resultados na área de saída
             self.outputArea.append("Resultados das Propriedades do Fluido:")
             self.outputArea.append(f"Temperatura: {temp} °C")
             self.outputArea.append(f"Pressão: {pressure} bar")
@@ -961,14 +1052,12 @@ class OpenFOAMInterface(QWidget):
 
         layout = QVBoxLayout(dialog)
 
-        # Tabela de histórico
         self.historyTable = QTableWidget(dialog)
         self.historyTable.setColumnCount(5)
-        self.historyTable.setHorizontalHeaderLabels(["Solver", "Caminho do Caso", "Início", "Fim", "Status"])
+        self.historyTable.setHorizontalHeaderLabels(["Solver", "Malha", "Início", "Fim", "Status"])
         self.loadHistoryIntoTable()
         layout.addWidget(self.historyTable)
 
-        # Botões
         buttonLayout = QHBoxLayout()
         
         clearAllButton = QPushButton("Limpar Tudo", dialog)
@@ -1022,6 +1111,20 @@ class OpenFOAMInterface(QWidget):
             self.simulationHistory.save_history()  # Salva as alterações no arquivo
             self.loadHistoryIntoTable()  # Atualiza a tabela
             QMessageBox.information(self, "Simulação Excluída", "A simulação selecionada foi excluída com sucesso.")
+
+    def filterTreeView(self, text):
+        """Filtra os itens da árvore de diretórios com base no texto inserido."""
+        def filterItems(item, text):
+            match = text.lower() in item.text().lower()
+            for row in range(item.rowCount()):
+                child = item.child(row)
+                match = filterItems(child, text) or match
+            item.setHidden(match)
+            return match
+
+        for row in range(self.treeModel.rowCount()):
+            rootItem = self.treeModel.item(row)
+            filterItems(rootItem, text)
 
 class FluidProperties:
     def __init__(self):
