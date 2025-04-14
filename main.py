@@ -14,17 +14,25 @@ from rate_calculator import calculate_increase_rate
 from syntax_highlighter import OpenFOAMHighlighter
 from simulation_history import SimulationHistory
 from datetime import datetime
+import json
 
 class OpenFOAMInterface(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("GAFoam")
         self.resize(1000, 600)
-        
+
+        # Carregar configurações
+        self.config_file = "config.json"
+        self.config = self.load_config()
+
+        # Caminhos parametrizados
+        self.baseDir = self.config.get("baseDir", os.getcwd())
+        self.systemDir = os.path.join(self.baseDir, "system")
         self.unvFilePath = ""
         self.currentFilePath = ""
-        self.currentOpenFOAMVersion = "openfoam9"
-        self.currentSolver = "twoLiquidMixingFoam"
+        self.currentOpenFOAMVersion = self.config.get("openFOAMVersion", "openfoam9")
+        self.currentSolver = self.config.get("solver", "twoLiquidMixingFoam")
         self.currentProcess = None
         
         # Dados para gráfico de resíduos
@@ -173,6 +181,10 @@ class OpenFOAMInterface(QWidget):
         self.menuBar.addMenu(historyMenu)
         
         self.mainVerticalLayout.setMenuBar(self.menuBar)
+
+        setBaseDirAction = QAction("Configurar Diretório Base", self)
+        setBaseDirAction.triggered.connect(self.set_base_dir)
+        fileMenu.addAction(setBaseDirAction)
     
     def setOpenFOAMVersion(self, version):
         self.currentOpenFOAMVersion = version
@@ -763,7 +775,6 @@ class OpenFOAMInterface(QWidget):
 
         self.clearResidualPlot()
 
-        # Comando para rodar a simulação
         if self.currentOpenFOAMVersion == "openfoam12":
             command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 2 foamRun -parallel"'
         else:
@@ -825,19 +836,14 @@ class OpenFOAMInterface(QWidget):
         self.outputArea.append("Terminal limpo.", 2000)
     
     def editFile(self):
-        systemDir = "/home/gaf/build-GAFoam-Desktop-Debug/system"
-        print(f"Diretório escolhido: {systemDir}")
-        
+        """Abre um arquivo para edição no editor."""
         fileName, _ = QFileDialog.getOpenFileName(
             self,
             "Escolher Arquivo de Código",
-            systemDir,
+            self.systemDir,
             "Todos os Arquivos (*);;Arquivos de Código (*.dict *.txt *.swp)"
         )
-        
         if fileName:
-            print(f"Arquivo selecionado: {fileName}")
-            
             file = QtCore.QFile(fileName)
             if file.open(QtCore.QIODevice.ReadOnly | QtCore.QIODevice.Text):
                 self.currentFilePath = fileName
@@ -1165,6 +1171,33 @@ class OpenFOAMInterface(QWidget):
             except Exception as e:
                 self.outputArea.append(f"Erro ao atualizar decomposeParDict: {str(e)}")
 
+    def load_config(self):
+        """Carrega as configurações do arquivo config.json."""
+        if os.path.exists(self.config_file):
+            with open(self.config_file, "r") as file:
+                return json.load(file)
+        else:
+            return {}
+
+    def save_config(self):
+        """Salva as configurações no arquivo config.json."""
+        with open(self.config_file, "w") as file:
+            json.dump(self.config, file, indent=4)
+
+    def set_base_dir(self):
+        """Permite ao usuário definir o diretório base."""
+        baseDir = QFileDialog.getExistingDirectory(
+            self, "Escolher Diretório Base", os.getcwd(), QFileDialog.ShowDirsOnly
+        )
+        if baseDir:
+            self.baseDir = baseDir
+            self.systemDir = os.path.join(self.baseDir, "system")
+            self.config["baseDir"] = self.baseDir
+            self.save_config()
+            self.outputArea.append(f"Diretório base configurado para: {self.baseDir}")
+        else:
+            self.outputArea.append("Nenhum diretório base selecionado.")
+
 class FluidProperties:
     def __init__(self):
         # Constantes para densidade da água (Palliser & McKibbin modelo I)
@@ -1195,16 +1228,17 @@ class FluidProperties:
             mu_b = self.mu_w_base * (1 - X) + self.mu_c_800 * X
         return mu_b
 
+# Atualize o método calculateFluidProperties para incluir o cálculo da viscosidade
 def calculateFluidProperties(self, dialog, temp, pressure, salinity):
     try:
         temp = float(temp)
-        pressure = float(pressure) * 10  
-        salinity = float(salinity) / 1e6 
+        pressure = float(pressure) * 10  # Converte MPa para bar
+        salinity = float(salinity) / 1e6  # Converte mg/L para fração mássica
 
         fluid = FluidProperties()
 
         density = fluid.brine_density(temp, pressure, salinity)
-        viscosity = fluid.brine_viscosity(temp, pressure, salinity) * 1000 
+        viscosity = fluid.brine_viscosity(temp, pressure, salinity) * 1000  # Converte Pa.s para mPa.s
 
         self.outputArea.append("Resultados das Propriedades do Fluido:")
         self.outputArea.append(f"Temperatura: {temp} °C")
