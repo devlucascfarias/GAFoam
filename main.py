@@ -5,7 +5,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt5.QtWidgets import (QApplication, QWidget, QWidgetAction, QPushButton, QVBoxLayout, QHBoxLayout, 
                              QFileDialog, QTextEdit, QLabel, QMenuBar, QMenu, QAction, 
-                             QLineEdit, QStatusBar, QTreeView, QComboBox, QDialog, QTableWidget, QTableWidgetItem, QMessageBox)
+                             QLineEdit, QStatusBar, QTreeView, QComboBox, QDialog, QTableWidget, QTableWidgetItem, QMessageBox, QInputDialog)
 from PyQt5.QtCore import QTimer, QProcess, Qt, QDir, QFileInfo, QProcessEnvironment
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QIcon
 from PyQt5 import QtCore
@@ -239,6 +239,12 @@ class OpenFOAMInterface(QWidget):
         buttonRowLayout.addWidget(self.openParaviewButton)
         buttonRowLayout.addWidget(self.calculateRateButton)
         buttonRowLayout.addWidget(self.fluidPropertiesButton)
+
+        # Adicionar botão para configurar núcleos
+        self.setCoresButton = QPushButton("Configurar Núcleos para decomposePar", self)
+        self.setCoresButton.clicked.connect(self.configureDecomposeParCores)
+        buttonRowLayout.addWidget(self.setCoresButton)
+
         terminalLayout.addLayout(buttonRowLayout)
         
         self.outputArea = QTextEdit(self)
@@ -276,6 +282,7 @@ class OpenFOAMInterface(QWidget):
 
         graphControlLayout.addWidget(self.clearPlotButton)
         graphControlLayout.addWidget(self.exportPlotDataButton)
+
 
         residualLayout.addLayout(graphControlLayout)
         
@@ -758,9 +765,9 @@ class OpenFOAMInterface(QWidget):
 
         # Comando para rodar a simulação
         if self.currentOpenFOAMVersion == "openfoam12":
-            command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 6 foamRun -parallel"'
+            command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 2 foamRun -parallel"'
         else:
-            command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 6 {self.currentSolver} -parallel"'
+            command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 2 {self.currentSolver} -parallel"'
 
         self.outputArea.append(f"Iniciando simulação com {self.currentSolver}...")
         self.currentProcess = QProcess(self)
@@ -1024,20 +1031,20 @@ class OpenFOAMInterface(QWidget):
     def calculateFluidProperties(self, dialog, temp, pressure, salinity):
         try:
             temp = float(temp)
-            pressure = float(pressure) * 10
-            salinity = float(salinity) / 1e6 
+            pressure = float(pressure) * 10  # Converte MPa para bar
+            salinity = float(salinity) / 1e6  # Converte mg/L para fração mássica
 
             fluid = FluidProperties()
 
             density = fluid.brine_density(temp, pressure, salinity)
-            viscosity = fluid.brine_viscosity(temp, pressure, salinity)
+            viscosity = fluid.brine_viscosity(temp, pressure, salinity) * 1000  # Converte Pa.s para mPa.s
 
             self.outputArea.append("Resultados das Propriedades do Fluido:")
             self.outputArea.append(f"Temperatura: {temp} °C")
             self.outputArea.append(f"Pressão: {pressure} bar")
             self.outputArea.append(f"Salinidade: {salinity:.6f} (fração mássica)")
             self.outputArea.append(f"Densidade: {density:.2f} kg/m³")
-            self.outputArea.append(f"Viscosidade: {viscosity:.6f} Pa.s")
+            self.outputArea.append(f"Viscosidade: {viscosity:.6f} mPa·s")
 
             dialog.accept()
         except ValueError:
@@ -1126,11 +1133,45 @@ class OpenFOAMInterface(QWidget):
             rootItem = self.treeModel.item(row)
             filterItems(rootItem, text)
 
+    def configureDecomposeParCores(self):
+        """Abre um diálogo para configurar o número de núcleos e atualiza o decomposeParDict."""
+        num_cores, ok = QInputDialog.getInt(
+            self,
+            "Configurar Núcleos",
+            "Digite o número de núcleos para decomposePar:",
+            min=1,
+            max=128,  # Limite máximo de núcleos
+            value=2   # Valor padrão
+        )
+        if ok:
+            self.num_cores = num_cores  # Armazena o número de núcleos como atributo da classe
+            decompose_par_dict_path = "/home/gaf/build-GAFoam-Desktop-Debug/system/decomposeParDict"
+            try:
+                # Ler o arquivo decomposeParDict
+                with open(decompose_par_dict_path, "r") as file:
+                    lines = file.readlines()
+
+                # Atualizar o valor de numberOfSubdomains
+                with open(decompose_par_dict_path, "w") as file:
+                    for line in lines:
+                        if "numberOfSubdomains" in line:
+                            file.write(f"numberOfSubdomains {num_cores};\n")
+                        else:
+                            file.write(line)
+
+                self.outputArea.append(f"Arquivo decomposeParDict atualizado com {num_cores} núcleos.")
+            except FileNotFoundError:
+                self.outputArea.append("Erro: Arquivo decomposeParDict não encontrado.")
+            except Exception as e:
+                self.outputArea.append(f"Erro ao atualizar decomposeParDict: {str(e)}")
+
 class FluidProperties:
     def __init__(self):
         # Constantes para densidade da água (Palliser & McKibbin modelo I)
         self.c0, self.c1, self.c2, self.c3 = 999.84, 0.0679, -0.0085, 0.0001
         self.A, self.B = 0.51, -0.0002  # Coeficientes de pressão em bar
+        self.mu_c_800 = 2.0  # Viscosidade do NaCl fundido a 800°C em cP (exemplo)
+        self.mu_w_base = 0.00089  # Viscosidade da água em condições padrão em Pa.s
 
     def water_density(self, T, P):
         """Calcula a densidade da água pura (rho_w) em função da temperatura (T) e pressão (P)."""
@@ -1145,10 +1186,38 @@ class FluidProperties:
         return rho_b
 
     def brine_viscosity(self, T, P, X):
-        """Calcula a viscosidade da salmoura (mu_b) (exemplo simplificado)."""
-        # Implementar o modelo de viscosidade apropriado
-        # Para simplificação, retornamos um valor fixo
-        return 0.001  # Exemplo: viscosidade em Pa.s
+        """Calcula a viscosidade da salmoura (mu_b) em função de T, P e salinidade (X)."""
+        if T < 800:
+            term1 = self.mu_w_base * (1 + 3 * X) * ((800 - T) / 800) ** 9
+            term2 = ((T / 800) ** 9) * (self.mu_w_base * (1 - X) + X * self.mu_c_800)
+            mu_b = (term1 + term2) / (((800 - T) / 800) ** 9 + (T / 800) ** 9)
+        else:
+            mu_b = self.mu_w_base * (1 - X) + self.mu_c_800 * X
+        return mu_b
+
+def calculateFluidProperties(self, dialog, temp, pressure, salinity):
+    try:
+        temp = float(temp)
+        pressure = float(pressure) * 10  
+        salinity = float(salinity) / 1e6 
+
+        fluid = FluidProperties()
+
+        density = fluid.brine_density(temp, pressure, salinity)
+        viscosity = fluid.brine_viscosity(temp, pressure, salinity) * 1000 
+
+        self.outputArea.append("Resultados das Propriedades do Fluido:")
+        self.outputArea.append(f"Temperatura: {temp} °C")
+        self.outputArea.append(f"Pressão: {pressure} bar")
+        self.outputArea.append(f"Salinidade: {salinity:.6f} (fração mássica)")
+        self.outputArea.append(f"Densidade: {density:.2f} kg/m³")
+        self.outputArea.append(f"Viscosidade: {viscosity:.6f} mPa·s")
+
+        dialog.accept()
+    except ValueError:
+        self.outputArea.append("Erro: Certifique-se de que todos os valores são números válidos.")
+    except Exception as e:
+        self.outputArea.append(f"Erro ao calcular propriedades: {str(e)}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
