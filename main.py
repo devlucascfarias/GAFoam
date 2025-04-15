@@ -71,7 +71,7 @@ class OpenFOAMInterface(QWidget):
         return versions
     
     def clearOldProcessorDirs(self):
-        caseDir = QDir("/home/gaf/build-GAFoam-Desktop-Debug")
+        caseDir = QDir(self.baseDir)
         
         processorDirs = caseDir.entryList(["processor*"], QDir.Dirs | QDir.NoDotAndDotDot)
         for dirName in processorDirs:
@@ -89,10 +89,22 @@ class OpenFOAMInterface(QWidget):
         
         if unvFilePath:
             self.unvFilePath = unvFilePath
-            self.outputArea.append(f"Arquivo .unv carregado: {unvFilePath}")
-            self.meshPathLabel.setText(f"Malha: {QFileInfo(unvFilePath).fileName()}")
+            # Obtém o diretório pai do arquivo .unv
+            caseDir = QFileInfo(unvFilePath).absolutePath()
+            
+            # Verifica se o diretório pai contém os diretórios necessários do OpenFOAM
+            required_dirs = ["0", "system", "constant"]
+            if all(QDir(caseDir).exists(dir_name) for dir_name in required_dirs):
+                self.baseDir = caseDir  # Atualiza o diretório base
+                self.systemDir = os.path.join(caseDir, "system")
+                self.outputArea.append(f"Arquivo .unv carregado: {unvFilePath}")
+                self.meshPathLabel.setText(f"Malha: {QFileInfo(unvFilePath).fileName()}")
+                self.populateTreeView(caseDir)  # Atualiza a árvore de diretórios com o diretório do caso
+            else:
+                self.outputArea.append(f"Aviso: O diretório '{caseDir}' não contém as pastas necessárias do OpenFOAM (0, system, constant).")
+                self.outputArea.append("Você pode precisar criar manualmente a estrutura de caso do OpenFOAM.")
         else:
-            self.outputArea.append("Nenhum arquivo .unv foi selecionado.")    
+            self.outputArea.append("Nenhum arquivo .unv foi selecionado.")   
     
     def chooseCase(self):
         casePath = QFileDialog.getExistingDirectory(
@@ -204,7 +216,7 @@ class OpenFOAMInterface(QWidget):
             self.outputArea.append(f"Solver selecionado: {solverName}")
             
             # Atualiza o controlDict com o novo solver
-            controlDictPath = "/home/gaf/build-GAFoam-Desktop-Debug/system/controlDict"
+            controlDictPath = os.path.join(self.baseDir, "system", "controlDict")
             try:
                 with open(controlDictPath, "r") as file:
                     content = file.read()
@@ -483,7 +495,7 @@ class OpenFOAMInterface(QWidget):
     def populateTreeView(self, casePath=None):
         """Atualiza a árvore de diretórios com o conteúdo do caso"""
         if not casePath:
-            casePath = QFileInfo(self.unvFilePath).absolutePath() if self.unvFilePath else "/home/gaf/build-GAFoam-Desktop-Debug"
+            casePath = QFileInfo(self.unvFilePath).absolutePath() if self.unvFilePath else self.baseDir
         
         self.treeModel = QStandardItemModel(self)
         rootItem = QStandardItem(QIcon.fromTheme("folder"), casePath)
@@ -615,20 +627,16 @@ class OpenFOAMInterface(QWidget):
         self.residualLines = {}
 
     def connectProcessSignals(self, process):
-        """Conecta os sinais do processo para capturar saída e atualizar resíduos."""
-        def readOutput():
-            while process.canReadLine():
-                output = str(process.readLine(), 'utf-8').strip()
-                self.outputArea.append(output)
-                self.parseResiduals(output)
-                QApplication.processEvents()  # Força a atualização da interface
+        process.readyReadStandardOutput.connect(self.readOutput)
+        process.readyReadStandardError.connect(self.readError)
 
-        def readError():
-            error = str(process.readAllStandardError(), 'utf-8').strip()
-            self.outputArea.append(error)
+    def readOutput(self):
+        output = str(self.currentProcess.readAllStandardOutput(), 'utf-8').strip()
+        self.outputArea.append(output)
 
-        process.readyReadStandardOutput.connect(readOutput)
-        process.readyReadStandardError.connect(readError)
+    def readError(self):
+        error = str(self.currentProcess.readAllStandardError(), 'utf-8').strip()
+        self.outputArea.append(f"Erro: {error}")
 
     # Atualize o método runSimulation para verificar se o caso é válido
         start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -703,36 +711,52 @@ class OpenFOAMInterface(QWidget):
     
     def decomposePar(self):
         if not self.unvFilePath:
-            self.outputArea.append("Erro: Nenhum caso selecionado.")
+            self.outputArea.append("Erro: Nenhum caso ou arquivo .unv selecionado.")
             return
 
-        # Verifica se a pasta do caso contém os diretórios necessários
+        # Verifica se o caminho é um arquivo .unv ou uma pasta de caso
+        if self.unvFilePath.endswith(".unv"):
+            caseDir = QFileInfo(self.unvFilePath).absolutePath()
+            self.outputArea.append(f"Arquivo .unv carregado: {self.unvFilePath}")
+        elif QDir(self.unvFilePath).exists("0") and QDir(self.unvFilePath).exists("system") and QDir(self.unvFilePath).exists("constant"):
+            caseDir = self.unvFilePath
+            self.outputArea.append(f"Pasta de caso carregada: {self.unvFilePath}")
+        else:
+            self.outputArea.append("Erro: O caminho selecionado não é válido. Certifique-se de que é um arquivo .unv ou uma pasta de caso válida.")
+            return
+
+        # Verifica novamente se o diretório contém as pastas necessárias
         required_dirs = ["0", "system", "constant"]
-        if not all(QDir(self.unvFilePath).exists(dir_name) for dir_name in required_dirs):
-            self.outputArea.append("Erro: A pasta selecionada não contém os diretórios necessários (0, system, constant).")
+        missing_dirs = [dir_name for dir_name in required_dirs if not QDir(caseDir).exists(dir_name)]
+
+        if missing_dirs:
+            self.outputArea.append(f"Erro: O diretório do caso ({caseDir}) não contém os diretórios necessários ({', '.join(missing_dirs)}).")
             return
 
+        self.outputArea.append(f"Debug: Caminho selecionado para o caso: {caseDir}")
         self.outputArea.append("Iniciando decomposição dos núcleos...")
+
+        # Comando para executar decomposePar
         command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && decomposePar"'
 
         self.currentProcess = QProcess(self)
         self.setupProcessEnvironment(self.currentProcess)
 
         # Define a pasta do caso como diretório de trabalho
-        self.currentProcess.setWorkingDirectory(self.unvFilePath)
+        self.currentProcess.setWorkingDirectory(caseDir)
 
         def finished(code):
             if code == 0:
                 self.outputArea.append("Decomposição concluída com sucesso.")
             else:
-                self.outputArea.append(f"Erro na decomposição: código {code}")
+                self.outputArea.append(f"Erro na decomposição: código {code}. Verifique os logs para mais detalhes.")
 
         self.currentProcess.finished.connect(finished)
         self.connectProcessSignals(self.currentProcess)
         self.currentProcess.start("bash", ["-l", "-c", command])
     
     def clearSimulation(self):
-        caseDir = QDir("/home/gaf/build-GAFoam-Desktop-Debug")
+        caseDir = QDir(self.baseDir)
         timeDirs = caseDir.entryList(QDir.Dirs | QDir.NoDotAndDotDot)
         removedAny = False
         
@@ -760,22 +784,25 @@ class OpenFOAMInterface(QWidget):
             self.outputArea.append("Erro: Nenhum caso ou arquivo .unv selecionado.")
             return
 
-        # Verifica se é uma pasta de caso válida
-        if QDir(self.unvFilePath).exists("0") and QDir(self.unvFilePath).exists("system") and QDir(self.unvFilePath).exists("constant"):
-            casePath = self.unvFilePath
-        elif self.unvFilePath.endswith(".unv"):
+        # Verifica se é uma pasta de caso válida ou um arquivo .unv
+        if self.unvFilePath.endswith(".unv"):
             casePath = QFileInfo(self.unvFilePath).absolutePath()
+            self.outputArea.append(f"Arquivo .unv carregado: {self.unvFilePath}")
+        elif QDir(self.unvFilePath).exists("0") and QDir(self.unvFilePath).exists("system") and QDir(self.unvFilePath).exists("constant"):
+            casePath = self.unvFilePath
+            self.outputArea.append(f"Pasta de caso carregada: {self.unvFilePath}")
         else:
-            self.outputArea.append("Erro: O caminho selecionado não é válido.")
+            self.outputArea.append("Erro: O caminho selecionado não é válido. Certifique-se de que é um arquivo .unv ou uma pasta de caso válida.")
             return
 
         if not self.currentSolver:
-            self.outputArea.append("Erro: Nenhum solver selecionado.")
+            self.outputArea.append("Erro: Nenhum solver selecionado. Configure o solver antes de iniciar a simulação.")
             return
 
         self.clearResidualPlot()
 
-        if self.currentOpenFOAMVersion == "openfoam12":
+        # Comando para diferentes versões do OpenFOAM
+        if self.currentOpenFOAMVersion in ["openfoam12", "openfoam11"]:
             command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 2 foamRun -parallel"'
         else:
             command = f'bash -l -c "source /opt/{self.currentOpenFOAMVersion}/etc/bashrc && mpirun -np 2 {self.currentSolver} -parallel"'
@@ -791,11 +818,12 @@ class OpenFOAMInterface(QWidget):
             if code == 0:
                 self.outputArea.append("Simulação concluída com sucesso.")
             else:
-                self.outputArea.append(f"Erro na simulação: código {code}")
+                self.outputArea.append(f"Erro na simulação: código {code}. Verifique os logs para mais detalhes.")
 
         self.currentProcess.finished.connect(finished)
         self.connectProcessSignals(self.currentProcess)
-        self.outputArea.append(f"Comando executado: {command}")
+        self.outputArea.append(f"Debug: Caminho do caso selecionado: {casePath}")
+        self.outputArea.append(f"Debug: Comando a ser executado: {command}")
 
         self.currentProcess.start("bash", ["-l", "-c", command])
         self.currentProcess.finished.connect(lambda: self.logSimulationCompletion(start_time))
@@ -890,22 +918,16 @@ class OpenFOAMInterface(QWidget):
         process.setProcessEnvironment(env)
     
     def connectProcessSignals(self, process):
-        """Conecta os sinais do processo para capturar saída e atualizar resíduos."""
-        def readOutput():
-            while process.canReadLine():
-                output = str(process.readLine(), 'utf-8').strip()
-                self.outputArea.append(output)
-                self.parseResiduals(output)
-                QApplication.processEvents() 
+        process.readyReadStandardOutput.connect(self.readOutput)
+        process.readyReadStandardError.connect(self.readError)
 
-        def readError():
-            while process.canReadLine():
-                error = str(process.readLineStandardError(), 'utf-8').strip()
-                self.outputArea.append(error)
+    def readOutput(self):
+        output = str(self.currentProcess.readAllStandardOutput(), 'utf-8').strip()
+        self.outputArea.append(output)
 
-        process.readyReadStandardOutput.connect(readOutput)
-        process.readyReadStandardError.connect(readError)
-
+    def readError(self):
+        error = str(self.currentProcess.readAllStandardError(), 'utf-8').strip()
+        self.outputArea.append(f"Erro: {error}")
 
     def calculateRates(self):
         try:
@@ -1151,7 +1173,7 @@ class OpenFOAMInterface(QWidget):
         )
         if ok:
             self.num_cores = num_cores  # Armazena o número de núcleos como atributo da classe
-            decompose_par_dict_path = "/home/gaf/build-GAFoam-Desktop-Debug/system/decomposeParDict"
+            decompose_par_dict_path = os.path.join(self.baseDir, "system", "decomposeParDict")
             try:
                 # Ler o arquivo decomposeParDict
                 with open(decompose_par_dict_path, "r") as file:
@@ -1195,6 +1217,9 @@ class OpenFOAMInterface(QWidget):
             self.config["baseDir"] = self.baseDir
             self.save_config()
             self.outputArea.append(f"Diretório base configurado para: {self.baseDir}")
+            
+            # Atualiza a visualização da árvore para mostrar o novo diretório base
+            self.populateTreeView(self.baseDir)
         else:
             self.outputArea.append("Nenhum diretório base selecionado.")
 
