@@ -41,7 +41,7 @@ class OpenFOAMInterface(QWidget):
         
         ''' 
         
-        === DADOS PARA O GRÁFICOD DE RESÍDUOS ===
+        === DADOS PARA O GRÁFICO DE RESÍDUOS ===
         
         '''
 
