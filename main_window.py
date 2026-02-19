@@ -37,10 +37,18 @@ class MainWindow(QMainWindow):
 
         self.sim_log_view = QTextEdit(parent=self)
         self.sim_log_view.setReadOnly(True)
-        self.tab_widget.addTab(self.sim_log_view, "Logs")
-
         self.residuals_view = ResidualsWidget(parent=self)
-        self.tab_widget.addTab(self.residuals_view, "Resíduos")
+
+        self.logs_panel = QWidget(parent=self)
+        logs_layout = QVBoxLayout(self.logs_panel)
+        logs_layout.setContentsMargins(0, 0, 0, 0)
+        self.logs_splitter = QSplitter(Qt.Horizontal)
+        self.logs_splitter.addWidget(self.sim_log_view)
+        self.logs_splitter.addWidget(self.residuals_view)
+        self.logs_splitter.setStretchFactor(0, 1)
+        self.logs_splitter.setStretchFactor(1, 1)
+        logs_layout.addWidget(self.logs_splitter)
+        self.tab_widget.addTab(self.logs_panel, "Logs")
 
         right_splitter = QSplitter(Qt.Vertical)
         right_splitter.addWidget(self.editor_tabs)
@@ -387,6 +395,7 @@ class MainWindow(QMainWindow):
 
     def parse_residuals(self, text):
         import re
+        import math
         pattern = r"Solving for (\w+), Initial residual = ([\d.e+-]+)"
         matches = re.finditer(pattern, text)
         res_dict = {}
@@ -397,6 +406,20 @@ class MainWindow(QMainWindow):
                 res_dict[var_name] = float(value)
             except ValueError:
                 pass
+
+        # Mostra modulo da velocidade em vez de componentes Ux/Uy/Uz.
+        u_components = ("Ux", "Uy", "Uz")
+        if all(k in res_dict for k in u_components):
+            umag = math.sqrt(
+                res_dict["Ux"] ** 2 + res_dict["Uy"] ** 2 + res_dict["Uz"] ** 2
+            )
+            for k in u_components:
+                res_dict.pop(k, None)
+            res_dict["|U|"] = umag
+        else:
+            for k in u_components:
+                res_dict.pop(k, None)
+
         if res_dict:
             self.residuals_view.update_residuals(res_dict)
 
