@@ -1,0 +1,133 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  12
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      binary;
+    class       volVectorField;
+    location    "0";
+    object      U;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 1 -1 0 0 0 0];
+
+internalField   uniform (0 0 0);
+
+boundaryField
+{
+    minX
+    {
+        type            symmetry;
+    }
+    maxX
+    {
+        type            symmetry;
+    }
+    minY
+    {
+        type            symmetry;
+    }
+    maxY
+    {
+        type            symmetry;
+    }
+    minZ
+    {
+        type            symmetry;
+    }
+    maxZ
+    {
+        type            symmetry;
+    }
+    inletGeo
+    {
+        type            codedFixedValue;
+        value           nonuniform List<vector> 
+0
+;
+        name            inletVelocityPulse;
+        code            #{
+            const scalar t = this->db().time().value();
+
+            const scalar freq = 1.0;        
+            const scalar T = 1.0 / freq;   
+
+            const scalar Q_amp = 2.44e-05;
+
+            const scalar tau = fmod(t, T);
+            const scalar tE = 0.2 * T;      
+            const scalar tA = 0.8 * T;      
+            const scalar sigmaE = 0.05 * T; 
+            const scalar sigmaA = 0.05 * T; 
+            
+            const scalar aE = 1.0; 
+            const scalar aA = 0.5; 
+
+            scalar E_wave = aE * exp(-pow((tau - tE) / (sigmaE * sqrt(2.0)), 2));
+            scalar A_wave = aA * exp(-pow((tau - tA) / (sigmaA * sqrt(2.0)), 2));
+
+            // Vazão Instantânea
+            scalar Q_t = Q_amp * (E_wave + A_wave);
+
+            // ===== 3. Geometria e Velocidade =====
+            const fvPatch& patch = this->patch();
+            const scalar A_inlet = gSum(patch.magSf());
+
+            // Velocidade média
+            scalar U_mean = Q_t / A_inlet;
+            U_mean = max(U_mean, scalar(0.0)); 
+
+            if (t < T) 
+            {
+                Info<< "Time:" << t 
+                    << " | Area:" << A_inlet 
+                    << " | Q:" << Q_t 
+                    << " | U_mean:" << U_mean << endl;
+            }
+
+            vector U_inlet = vector(0, -U_mean, 0);
+            operator==(U_inlet);
+        #};
+    }
+    outletGeo
+    {
+        type            inletOutlet;
+        inletValue      nonuniform List<vector> 
+0
+;
+        value           nonuniform List<vector> 
+0
+;
+    }
+    wallsGeo
+    {
+        type            noSlip;
+    }
+    front_and_backGeo
+    {
+        type            symmetry;
+    }
+    procBoundary1to0
+    {
+        type            processor;
+        value           uniform (0 0 0);
+    }
+    procBoundary1to2
+    {
+        type            processor;
+        value           uniform (0 0 0);
+    }
+    procBoundary1to6
+    {
+        type            processor;
+        value           uniform (0 0 0);
+    }
+}
+
+
+// ************************************************************************* //

@@ -1,0 +1,26 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| OpenFOAM: The Open Source CFD Toolbox                                      |
+\*---------------------------------------------------------------------------*/
+
+FoamFile
+{
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      momentumTransport;
+}
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+simulationType  laminar;
+
+RAS
+
+{
+    // Liga a turbulência
+    turbulence      on;
+
+    model           kOmegaSST;
+
+    printCoeffs     on;
+}

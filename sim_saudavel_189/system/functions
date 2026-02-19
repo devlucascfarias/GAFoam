@@ -1,0 +1,42 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  13
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      functions;
+}
+// ************************************************************************* //
+
+// Fluxo e velocidade média nos patches
+
+#includeFunc patchAverage(patch=inletGeo, field=U, name=averageInletU) 
+#includeFunc patchAverage(patch=wallsGeo, field=U, name=averageWallsU)
+#includeFunc patchAverage(patch=outletGeo, field=U, name=averageOutletU)
+
+wallShearStress1
+
+{
+    type            wallShearStress;
+    libs            ("libfieldFunctionObjects.so");
+    
+    patches         ("wallsGeo"); 
+    
+    writeControl    writeTime; 
+}
+
+qCriterion1
+{
+    type            Q;
+    libs            ("libfieldFunctionObjects.so");
+    
+    field           U;
+
+    writeControl    writeTime;
+}

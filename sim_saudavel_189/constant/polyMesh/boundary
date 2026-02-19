@@ -1,0 +1,89 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  12
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      binary;
+    class       polyBoundaryMesh;
+    location    "constant/polyMesh";
+    object      boundary;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+10
+(
+    minX
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       64104;
+    }
+    maxX
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       64104;
+    }
+    minY
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       64104;
+    }
+    maxY
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       64104;
+    }
+    minZ
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       64104;
+    }
+    maxZ
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       64104;
+    }
+    inletGeo
+    {
+        type            patch;
+        nFaces          276;
+        startFace       64104;
+    }
+    outletGeo
+    {
+        type            patch;
+        nFaces          94;
+        startFace       64380;
+    }
+    wallsGeo
+    {
+        type            wall;
+        inGroups        List<word> 1(wall);
+        nFaces          6548;
+        startFace       64474;
+    }
+    front_and_backGeo
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          5792;
+        startFace       71022;
+    }
+)
+
+// ************************************************************************* //

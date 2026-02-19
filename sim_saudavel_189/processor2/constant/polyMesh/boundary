@@ -1,0 +1,149 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  12
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      binary;
+    class       polyBoundaryMesh;
+    location    "constant/polyMesh";
+    object      boundary;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+16
+(
+    minX
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       7768;
+    }
+    maxX
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       7768;
+    }
+    minY
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       7768;
+    }
+    maxY
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       7768;
+    }
+    minZ
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       7768;
+    }
+    maxZ
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          0;
+        startFace       7768;
+    }
+    inletGeo
+    {
+        type            patch;
+        nFaces          0;
+        startFace       7768;
+    }
+    outletGeo
+    {
+        type            patch;
+        nFaces          0;
+        startFace       7768;
+    }
+    wallsGeo
+    {
+        type            wall;
+        inGroups        List<word> 1(wall);
+        nFaces          670;
+        startFace       7768;
+    }
+    front_and_backGeo
+    {
+        type            symmetry;
+        inGroups        List<word> 1(symmetry);
+        nFaces          822;
+        startFace       8438;
+    }
+    procBoundary2to0
+    {
+        type            processor;
+        inGroups        List<word> 1(processor);
+        nFaces          124;
+        startFace       9260;
+        matchTolerance  0.0001;
+        myProcNo        2;
+        neighbProcNo    0;
+    }
+    procBoundary2to1
+    {
+        type            processor;
+        inGroups        List<word> 1(processor);
+        nFaces          48;
+        startFace       9384;
+        matchTolerance  0.0001;
+        myProcNo        2;
+        neighbProcNo    1;
+    }
+    procBoundary2to3
+    {
+        type            processor;
+        inGroups        List<word> 1(processor);
+        nFaces          72;
+        startFace       9432;
+        matchTolerance  0.0001;
+        myProcNo        2;
+        neighbProcNo    3;
+    }
+    procBoundary2to5
+    {
+        type            processor;
+        inGroups        List<word> 1(processor);
+        nFaces          40;
+        startFace       9504;
+        matchTolerance  0.0001;
+        myProcNo        2;
+        neighbProcNo    5;
+    }
+    procBoundary2to6
+    {
+        type            processor;
+        inGroups        List<word> 1(processor);
+        nFaces          28;
+        startFace       9544;
+        matchTolerance  0.0001;
+        myProcNo        2;
+        neighbProcNo    6;
+    }
+    procBoundary2to7
+    {
+        type            processor;
+        inGroups        List<word> 1(processor);
+        nFaces          76;
+        startFace       9572;
+        matchTolerance  0.0001;
+        myProcNo        2;
+        neighbProcNo    7;
+    }
+)
+
+// ************************************************************************* //

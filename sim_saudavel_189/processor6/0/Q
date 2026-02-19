@@ -1,0 +1,88 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  12
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      binary;
+    class       volScalarField;
+    location    "0";
+    object      Q;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 0 -2 0 0 0 0];
+
+internalField   uniform 0;
+
+boundaryField
+{
+    minX
+    {
+        type            symmetry;
+    }
+    maxX
+    {
+        type            symmetry;
+    }
+    minY
+    {
+        type            symmetry;
+    }
+    maxY
+    {
+        type            symmetry;
+    }
+    minZ
+    {
+        type            symmetry;
+    }
+    maxZ
+    {
+        type            symmetry;
+    }
+    inletGeo
+    {
+        type            calculated;
+        value           nonuniform List<scalar> 
+0
+;
+    }
+    outletGeo
+    {
+        type            calculated;
+        value           nonuniform List<scalar> 
+0
+;
+    }
+    wallsGeo
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+    front_and_backGeo
+    {
+        type            symmetry;
+    }
+    procBoundary6to1
+    {
+        type            processor;
+        value           uniform 0;
+    }
+    procBoundary6to2
+    {
+        type            processor;
+        value           uniform 0;
+    }
+    procBoundary6to7
+    {
+        type            processor;
+        value           uniform 0;
+    }
+}
+
+
+// ************************************************************************* //
