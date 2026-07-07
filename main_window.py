@@ -26,6 +26,9 @@ class MainWindow(QMainWindow):
         self.editor_tabs.setTabsClosable(True)
         self.editor_tabs.tabCloseRequested.connect(self.on_tab_close_requested)
 
+        self.geom_view = CaseGeometryWidget(parent=self)
+        self.editor_tabs.addTab(self.geom_view, "Geometria")
+
         self.path_to_editor = {}
         self.editor_to_path = {}
         self.current_case = None
@@ -49,10 +52,6 @@ class MainWindow(QMainWindow):
             "font-size: 10pt; line-height: 1.4; border: none; padding: 6px;"
         )
         self.tab_widget.addTab(self.sim_log_view, "Simulação")
-
-        # 3. Geometria (Visualização de STL/OBJ do Caso)
-        self.geom_view = CaseGeometryWidget(parent=self)
-        self.tab_widget.addTab(self.geom_view, "Geometria")
 
         self.residuals_view = ResidualsWidget(parent=self)
 
@@ -206,8 +205,11 @@ class MainWindow(QMainWindow):
             pass
 
     def focus_geometry_tab(self):
-        """Foca na aba Geometria no painel inferior."""
-        self.show_tab("Geometria")
+        """Foca na aba Geometria no painel superior (editor_tabs)."""
+        idx = self.editor_tabs.indexOf(self.geom_view)
+        if idx == -1:
+            idx = self.editor_tabs.addTab(self.geom_view, "Geometria")
+        self.editor_tabs.setCurrentIndex(idx)
 
     def show_tab(self, name):
         """Foca em uma aba específica pelo nome."""
@@ -329,6 +331,10 @@ class MainWindow(QMainWindow):
     def on_tab_close_requested(self, index):
         widget = self.editor_tabs.widget(index)
         if widget is None:
+            return
+        if widget == self.geom_view:
+            self.editor_tabs.removeTab(index)
+            # Não destrói a geom_view para que possa ser reaberta pelo botão de atalho
             return
         path = self.editor_to_path.get(widget)
         if path:
