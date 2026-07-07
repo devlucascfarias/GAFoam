@@ -20,8 +20,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Interface OpenFOAM")
-        self.resize(600, 400)
-
+        self.resize(1024, 768)
 
         self.editor_tabs = QTabWidget()
         self.editor_tabs.setTabsClosable(True)
@@ -32,26 +31,36 @@ class MainWindow(QMainWindow):
         self.current_case = None
 
         self.tab_widget = QTabWidget()
-        self.log_view = TerminalWidget(parent=self)
-        self.tab_widget.addTab(self.log_view, "Terminal")
+        
+        # 1. Console de Execução (logs da interface e saída padrão de comandos)
+        self.console_view = QTextEdit(parent=self)
+        self.console_view.setReadOnly(True)
+        self.console_view.setStyleSheet(
+            "font-family: 'Consolas', 'Monaco', 'Courier New', monospace; "
+            "font-size: 10pt; line-height: 1.4; border: none; padding: 6px;"
+        )
+        self.tab_widget.addTab(self.console_view, "Console")
 
+        # 2. Simulação (Visualização do Solver)
         self.sim_log_view = QTextEdit(parent=self)
         self.sim_log_view.setReadOnly(True)
+        self.sim_log_view.setStyleSheet(
+            "font-family: 'Consolas', 'Monaco', 'Courier New', monospace; "
+            "font-size: 10pt; line-height: 1.4; border: none; padding: 6px;"
+        )
+        self.tab_widget.addTab(self.sim_log_view, "Simulação")
+
         self.residuals_view = ResidualsWidget(parent=self)
 
-        self.logs_panel = QWidget(parent=self)
-        logs_layout = QVBoxLayout(self.logs_panel)
-        logs_layout.setContentsMargins(0, 0, 0, 0)
-        self.logs_splitter = QSplitter(Qt.Horizontal)
-        self.logs_splitter.addWidget(self.sim_log_view)
-        self.logs_splitter.addWidget(self.residuals_view)
-        self.logs_splitter.setStretchFactor(0, 1)
-        self.logs_splitter.setStretchFactor(1, 1)
-        logs_layout.addWidget(self.logs_splitter)
-        self.tab_widget.addTab(self.logs_panel, "Logs")
+        self.top_splitter = QSplitter(Qt.Horizontal)
+        self.top_splitter.addWidget(self.editor_tabs)
+        self.top_splitter.addWidget(self.residuals_view)
+        self.top_splitter.setStretchFactor(0, 3)
+        self.top_splitter.setStretchFactor(1, 2)
+        self.residuals_view.setVisible(False) # Hide initially
 
         right_splitter = QSplitter(Qt.Vertical)
-        right_splitter.addWidget(self.editor_tabs)
+        right_splitter.addWidget(self.top_splitter)
         right_splitter.addWidget(self.tab_widget)
         right_splitter.setStretchFactor(0, 3)
         right_splitter.setStretchFactor(1, 1)
@@ -61,29 +70,28 @@ class MainWindow(QMainWindow):
         try:
             self.toolbar = QToolBar("Run")
             self.toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            self.toolbar.setIconSize(QSize(18, 18))
             self.addToolBar(self.toolbar)
 
-            case_icon = QIcon.fromTheme('folder-open')
+            case_icon = self._load_svg_icon('open_case.svg', 'folder-open')
             case_act = QAction(case_icon, 'Abrir Caso', self)
             case_act.setToolTip('Selecionar Caso')
             case_act.setStatusTip('Selecionar a pasta do caso OpenFOAM')
             case_act.triggered.connect(self.selecionar_caso)
             self.toolbar.addAction(case_act)
-            sep_case = QLabel('|')
-            sep_case.setContentsMargins(6, 0, 6, 0)
-            self.toolbar.addWidget(sep_case)
+            self.toolbar.addSeparator()
 
-            run_icon = QIcon.fromTheme('media-playback-start')
-            stop_icon = QIcon.fromTheme('media-playback-stop')
+            run_icon = self._load_svg_icon('run_allrun.svg', 'media-playback-start')
+            stop_icon = self._load_svg_icon('stop_process.svg', 'media-playback-stop')
 
-            self.run_action = QAction(run_icon, 'Allrun', self)
+            self.run_action = QAction(run_icon, '', self)
             self.run_action.setToolTip('Rodar (Ctrl+R)')
             self.run_action.setStatusTip('Rodar simulação (Allrun)')
             self.run_action.setShortcut(QKeySequence('Ctrl+R'))
             self.run_action.triggered.connect(self.run_simulation)
             self.toolbar.addAction(self.run_action)
 
-            self.stop_action = QAction(stop_icon, 'Parar', self)
+            self.stop_action = QAction(stop_icon, '', self)
             self.stop_action.setToolTip('Parar')
             self.stop_action.setStatusTip('Parar processo em execução')
             self.stop_action.triggered.connect(self.stop_process)
@@ -93,31 +101,26 @@ class MainWindow(QMainWindow):
             pass
 
         try:
-            sep_label = QLabel('|')
-            sep_label.setContentsMargins(6, 0, 6, 0)
-            self.toolbar.addWidget(sep_label)
+            self.toolbar.addSeparator()
 
-            block_icon = QIcon.fromTheme('application-x-executable')
-            block_act = QAction(block_icon, 'blockMesh', self)
+            block_act = QAction('blockMesh', self)
             block_act.setStatusTip('Executar blockMesh')
             block_act.triggered.connect(self.run_blockMesh)
             self.toolbar.addAction(block_act)
 
-            check_icon = QIcon.fromTheme('dialog-ok')
-            check_act = QAction(check_icon, 'checkMesh', self)
+            check_act = QAction('checkMesh', self)
             check_act.setStatusTip('Executar checkMesh')
             check_act.triggered.connect(self.run_checkMesh)
             self.toolbar.addAction(check_act)
 
-            snappy_icon = QIcon.fromTheme('system-run')
-            snappy_act = QAction(snappy_icon, 'snappyHexMesh', self)
+            snappy_act = QAction('snappyHexMesh', self)
             snappy_act.setStatusTip('Executar snappyHexMesh')
             snappy_act.triggered.connect(self.run_snappyHexMesh)
             self.toolbar.addAction(snappy_act)
         except Exception:
             pass
 
-        self.scale = 1.0
+        self.scale = 1
 
         self.file_browser = FileBrowser(scale=self.scale, parent=self)
         self.file_view = self.file_browser.file_view
@@ -134,6 +137,7 @@ class MainWindow(QMainWindow):
 
         try:
             self.editor_tabs.setMinimumHeight(180)
+            self.top_splitter.setSizes([int(self.width() * 0.6), int(self.width() * 0.4)])
             right_splitter.setSizes([int(self.height() * 0.75), int(self.height() * 0.25)])
             splitter.setSizes([int(260 * self.scale), max(200, self.width() - int(260 * self.scale))])
         except Exception:
@@ -152,6 +156,7 @@ class MainWindow(QMainWindow):
         self.file_browser.set_click_callback(self.on_file_clicked)
 
         self.current_file = None
+        self.current_sim_time = None
         self.follow_solver_log = False
         self.log_follow_path = None
         self.log_follow_pos = 0
@@ -177,9 +182,34 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-
         self.apply_light_theme()
         self.apply_scale()
+
+    def log(self, text):
+        """Adiciona mensagens de log no Console de Execução."""
+        if not text:
+            return
+        try:
+            self.console_view.moveCursor(QTextCursor.End)
+            self.console_view.insertPlainText(text)
+            self.console_view.moveCursor(QTextCursor.End)
+        except Exception:
+            pass
+
+    def show_tab(self, name):
+        """Foca em uma aba específica pelo nome."""
+        for i in range(self.tab_widget.count()):
+            if self.tab_widget.tabText(i) == name:
+                self.tab_widget.setCurrentIndex(i)
+                break
+
+    def _load_svg_icon(self, filename, fallback_theme=None):
+        icon_path = os.path.join(os.path.dirname(__file__), 'icons', filename)
+        if os.path.isfile(icon_path):
+            return QIcon(icon_path)
+        if fallback_theme:
+            return QIcon.fromTheme(fallback_theme)
+        return QIcon()
 
     def selecionar_caso(self):
         from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -192,7 +222,8 @@ class MainWindow(QMainWindow):
         if missing:
             QMessageBox.critical(self, "Erro", f"A pasta selecionada não contém as subpastas obrigatórias: {', '.join(missing)}")
             return
-        self.log_view.append(f"Caso aberto: {dir_path}")
+        self.log(f"Caso aberto: {dir_path}\n")
+        self.show_tab("Console")
         self.file_browser.set_root(dir_path)
         self.current_case = dir_path
 
@@ -302,7 +333,7 @@ class MainWindow(QMainWindow):
         try:
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(editor.toPlainText())
-            self.log_view.append(f"Salvo: {path}")
+            self.log(f"Salvo: {path}\n")
             return True
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Falha ao salvar:\n{e}")
@@ -352,18 +383,115 @@ class MainWindow(QMainWindow):
 
     def apply_light_theme(self):
         app = QApplication.instance()
+        app.setStyle("Fusion")
         palette = QPalette()
-        palette.setColor(QPalette.Window, QColor(250, 250, 250))
-        palette.setColor(QPalette.WindowText, QColor(10, 10, 10))
-        palette.setColor(QPalette.Base, QColor(245, 245, 245))
-        palette.setColor(QPalette.AlternateBase, QColor(250, 250, 250))
-        palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 220))
-        palette.setColor(QPalette.ToolTipText, QColor(10, 10, 10))
-        palette.setColor(QPalette.Text, QColor(10, 10, 10))
-        palette.setColor(QPalette.Button, QColor(240, 240, 240))
-        palette.setColor(QPalette.ButtonText, QColor(10, 10, 10))
+        palette.setColor(QPalette.Window, QColor("#f4f4f4"))
+        palette.setColor(QPalette.WindowText, QColor("#161616"))
+        palette.setColor(QPalette.Base, QColor("#ffffff"))
+        palette.setColor(QPalette.AlternateBase, QColor("#f4f4f4"))
+        palette.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
+        palette.setColor(QPalette.ToolTipText, QColor("#161616"))
+        palette.setColor(QPalette.Text, QColor("#161616"))
+        palette.setColor(QPalette.Button, QColor("#e0e0e0"))
+        palette.setColor(QPalette.ButtonText, QColor("#161616"))
         palette.setColor(QPalette.BrightText, QColor(255, 0, 0))
+        palette.setColor(QPalette.Highlight, QColor("#0f62fe"))
+        palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         app.setPalette(palette)
+
+        app.setStyleSheet(
+            """
+            QMainWindow, QWidget {
+                background-color: #f4f4f4;
+                color: #161616;
+                font-family: "IBM Plex Sans", "Noto Sans", "DejaVu Sans";
+            }
+            QMenuBar {
+                background-color: #f4f4f4;
+                border-bottom: 1px solid #dde1e6;
+            }
+            QMenuBar::item {
+                spacing: 6px;
+                padding: 6px 10px;
+                background: transparent;
+            }
+            QMenuBar::item:selected {
+                background: #e0e0e0;
+            }
+            QMenu {
+                background-color: #ffffff;
+                border: 1px solid #c6c6c6;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #edf5ff;
+            }
+            QToolBar {
+                background: #f4f4f4;
+                border-bottom: 1px solid #dde1e6;
+                spacing: 6px;
+                padding: 4px;
+            }
+            QToolButton, QPushButton {
+                background-color: #e0e0e0;
+                border: 1px solid #c6c6c6;
+                border-radius: 2px;
+                padding: 5px 10px;
+            }
+            QToolButton:hover, QPushButton:hover {
+                background-color: #d0d0d0;
+            }
+            QToolButton:pressed, QPushButton:pressed {
+                background-color: #c6c6c6;
+            }
+            QLineEdit, QTextEdit, QPlainTextEdit, QListView, QTreeView, QComboBox {
+                background-color: #ffffff;
+                color: #161616;
+                border: 1px solid #c6c6c6;
+                border-radius: 2px;
+                selection-background-color: #0f62fe;
+                selection-color: #ffffff;
+            }
+            QTabWidget::pane {
+                border: 1px solid #dde1e6;
+                background: #ffffff;
+            }
+            QTabBar::tab {
+                background: #e0e0e0;
+                border: 1px solid #c6c6c6;
+                padding: 7px 12px;
+                margin-right: 1px;
+            }
+            QTabBar::tab:selected {
+                background: #ffffff;
+                border-bottom-color: #ffffff;
+            }
+            QStatusBar {
+                border-top: 1px solid #dde1e6;
+                background: #f4f4f4;
+            }
+            QProgressBar {
+                border: 1px solid #c6c6c6;
+                background: #ffffff;
+                border-radius: 2px;
+            }
+            QProgressBar::chunk {
+                background: #0f62fe;
+            }
+            QSplitter::handle {
+                background: #dde1e6;
+            }
+            QSplitter::handle:horizontal {
+                width: 4px;
+            }
+            QSplitter::handle:vertical {
+                height: 4px;
+            }
+            """
+        )
 
     def wheelEvent(self, event):
         super().wheelEvent(event)
@@ -377,51 +505,116 @@ class MainWindow(QMainWindow):
         self.apply_scale()
 
     def zoom_reset(self):
-        self.scale = 1.2
+        self.scale = 1.6
         self.apply_scale()
 
 
 
     def handle_stdout(self):
         data = self.process.readAllStandardOutput().data().decode()
-        self.log_view.append(data)
+        self.log(data)
 
     def handle_stderr(self):
         data = self.process.readAllStandardError().data().decode()
-        self.log_view.append(f"[ERR] {data}")
+        self.log(f"[ERR] {data}")
 
     def process_finished(self):
-        self.log_view.append("\nProcesso finalizado.")
+        self.log("\nProcesso finalizado.\n")
 
     def parse_residuals(self, text):
         import re
         import math
-        pattern = r"Solving for (\w+), Initial residual = ([\d.e+-]+)"
-        matches = re.finditer(pattern, text)
         res_dict = {}
-        for m in matches:
-            var_name = m.group(1)
-            value = m.group(2)
+
+        # Busca o tempo de simulação atual no log
+        for m in re.finditer(r"\bTime\s*[=:]\s*([\d.eE+-]+)", text):
             try:
-                res_dict[var_name] = float(value)
+                self.current_sim_time = float(m.group(1))
             except ValueError:
                 pass
 
-        # Mostra modulo da velocidade em vez de componentes Ux/Uy/Uz.
-        u_components = ("Ux", "Uy", "Uz")
-        if all(k in res_dict for k in u_components):
-            umag = math.sqrt(
-                res_dict["Ux"] ** 2 + res_dict["Uy"] ** 2 + res_dict["Uz"] ** 2
-            )
-            for k in u_components:
-                res_dict.pop(k, None)
-            res_dict["|U|"] = umag
-        else:
-            for k in u_components:
-                res_dict.pop(k, None)
+        # Residuos do solver
+        for m in re.finditer(r"Solving for (\w+), Initial residual = ([\d.eE+-]+)", text):
+            var_name = m.group(1)
+            try:
+                res_dict[var_name] = float(m.group(2))
+            except ValueError:
+                pass
+
+        # Mostra modulo da velocidade com os componentes disponiveis (2D ou 3D)
+        u_components = [k for k in ("Ux", "Uy", "Uz") if k in res_dict]
+        if u_components:
+            try:
+                umag = math.sqrt(sum(res_dict[k] ** 2 for k in u_components))
+                for k in ("Ux", "Uy", "Uz"):
+                    res_dict.pop(k, None)
+                res_dict["|U|"] = umag
+            except Exception:
+                pass
+
+        # yPlus stats: min/max/average
+        for m in re.finditer(
+            r"y\+\s*:\s*min\s*=\s*([\d.eE+-]+),\s*max\s*=\s*([\d.eE+-]+),\s*average\s*=\s*([\d.eE+-]+)",
+            text
+        ):
+            try:
+                res_dict["y+ min"] = float(m.group(1))
+                res_dict["y+ max"] = float(m.group(2))
+                res_dict["y+ avg"] = float(m.group(3))
+            except ValueError:
+                pass
+
+        # Courant number
+        for m in re.finditer(r"Courant Number mean:\s*([\d.eE+-]+)\s*max:\s*([\d.eE+-]+)", text):
+            try:
+                res_dict["Co mean"] = float(m.group(1))
+                res_dict["Co max"] = float(m.group(2))
+            except ValueError:
+                pass
+
+        # deltaT
+        for m in re.finditer(r"deltaT\s*=\s*([\d.eE+-]+)", text):
+            try:
+                res_dict["deltaT"] = float(m.group(1))
+            except ValueError:
+                pass
+
+        # Vazao/velocidade media de functionObject custom
+        for m in re.finditer(
+            r"Time:[^|\n]*\|\s*Area:\s*([\d.eE+-]+)\s*\|\s*Q:\s*([\d.eE+-]+)\s*\|\s*U_mean:\s*([\d.eE+-]+)",
+            text
+        ):
+            try:
+                res_dict["Area"] = float(m.group(1))
+                res_dict["Q"] = float(m.group(2))
+                res_dict["U_mean"] = float(m.group(3))
+            except ValueError:
+                pass
+
+        # min/max de U e p vindos de volFieldValue
+        for m in re.finditer(r"minMag\(\)\s+of\s+U\s*=\s*([\d.eE+-]+)", text):
+            try:
+                res_dict["U minMag"] = float(m.group(1))
+            except ValueError:
+                pass
+        for m in re.finditer(r"maxMag\(\)\s+of\s+U\s*=\s*([\d.eE+-]+)", text):
+            try:
+                res_dict["U maxMag"] = float(m.group(1))
+            except ValueError:
+                pass
+        for m in re.finditer(r"min\(\)\s+of\s+p\s*=\s*([\d.eE+-]+)", text):
+            try:
+                res_dict["p min"] = float(m.group(1))
+            except ValueError:
+                pass
+        for m in re.finditer(r"max\(\)\s+of\s+p\s*=\s*([\d.eE+-]+)", text):
+            try:
+                res_dict["p max"] = float(m.group(1))
+            except ValueError:
+                pass
 
         if res_dict:
-            self.residuals_view.update_residuals(res_dict)
+            self.residuals_view.update_residuals(res_dict, getattr(self, 'current_sim_time', None))
 
     def _run_command_in_case(self, command, args=None, follow_solver_log=False):
         from PySide6.QtWidgets import QMessageBox
@@ -434,9 +627,9 @@ class MainWindow(QMainWindow):
             alive = self._find_case_related_processes(self.current_case)
             alive.discard(os.getpid())
             if alive:
-                self.log_view.append(
+                self.log(
                     "Há processos do caso ainda em execução (background). "
-                    "Use Parar antes de iniciar novo comando."
+                    "Use Parar antes de iniciar novo comando.\n"
                 )
                 return
         self.follow_solver_log = bool(follow_solver_log)
@@ -447,14 +640,22 @@ class MainWindow(QMainWindow):
             self.log_follow_shown_path = None
             self.log_follow_timer.stop()
         if self.process.state() != QProcess.NotRunning:
-            self.log_view.append("Outro processo está em execução. Aguarde o término.")
+            self.log("Outro processo está em execução. Aguarde o término.\n")
             return
         self.process.setWorkingDirectory(self.current_case)
-        self.log_view.append(f"Executando: {command} {' '.join(args)} (cwd={self.current_case})")
+        self.log(f"$ {command} {' '.join(args)}\n")
+        
+        if follow_solver_log:
+            self.residuals_view.setVisible(True)
+            self.show_tab("Simulação")
+        else:
+            self.residuals_view.setVisible(False)
+            self.show_tab("Console")
+            
         try:
             self.process.start(command, args)
         except Exception as e:
-            self.log_view.append(f"Falha ao iniciar {command}: {e}")
+            self.log(f"Falha ao iniciar {command}: {e}\n")
 
     def stop_process(self):
         running = self.process.state() != QProcess.NotRunning
@@ -462,7 +663,7 @@ class MainWindow(QMainWindow):
         if not running and not detached:
             return
         try:
-            self.log_view.append("Solicitando parada do processo...")
+            self.log("Solicitando parada do processo...\n")
             targets = set()
 
             if running:
@@ -505,7 +706,7 @@ class MainWindow(QMainWindow):
                     pass
 
             if running and not self.process.waitForFinished(2500):
-                self.log_view.append("Forçando encerramento do processo e filhos...")
+                self.log("Forçando encerramento do processo e filhos...\n")
                 for pid in sorted(targets, reverse=True):
                     try:
                         os.kill(pid, signal.SIGKILL)
@@ -520,7 +721,7 @@ class MainWindow(QMainWindow):
             self.follow_solver_log = False
             self._set_idle_ui()
         except Exception as e:
-            self.log_view.append(f"Erro ao parar processo: {e}")
+            self.log(f"Erro ao parar processo: {e}\n")
 
     def _on_process_started(self):
         try:
@@ -591,7 +792,7 @@ class MainWindow(QMainWindow):
                 )
                 with open(allrun_path, 'w') as f:
                     f.write(content)
-                self.log_view.append("Allrun criado automaticamente.")
+                self.log("Allrun criado automaticamente.\n")
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Não foi possível criar Allrun: {e}")
                 return
@@ -601,7 +802,7 @@ class MainWindow(QMainWindow):
             if not (st.st_mode & stat.S_IXUSR):
                 os.chmod(allrun_path, st.st_mode | stat.S_IXUSR)
         except Exception as e:
-            self.log_view.append(f"Aviso: não foi possível tornar Allrun executável: {e}")
+            self.log(f"Aviso: não foi possível tornar Allrun executável: {e}\n")
 
         self.log_follow_path = None
         self.log_follow_pos = 0
@@ -618,9 +819,9 @@ class MainWindow(QMainWindow):
 
     def _handle_process_finished_log(self):
         if self.follow_solver_log:
-            self.log_view.append("\nAllrun finalizado; monitorando solver em background...\n")
+            self.log("\nAllrun finalizado; monitorando solver em background...\n")
         else:
-            self.log_view.append("\nProcesso finalizado.\n")
+            self.log("\nProcesso finalizado.\n")
 
     def _choose_solver_log_file(self):
         case = getattr(self, 'current_case', None)
@@ -648,7 +849,7 @@ class MainWindow(QMainWindow):
             self.log_follow_pos = 0
             self.log_follow_ino = None
             if self.log_follow_path:
-                self.log_view.append(f"Monitorando resíduos em: {self.log_follow_path}")
+                self.log(f"Monitorando resíduos em: {self.log_follow_path}\n")
                 self.log_follow_shown_path = self.log_follow_path
                 self._append_sim_log(f"[tail -f] {self.log_follow_path}\n")
 
@@ -696,7 +897,7 @@ class MainWindow(QMainWindow):
                     self.follow_solver_log = False
                     self.log_follow_timer.stop()
                     self._set_idle_ui()
-                    self.log_view.append("\nProcesso finalizado (log estabilizado).\n")
+                    self.log("\nProcesso finalizado (log estabilizado).\n")
         except Exception:
             pass
 
@@ -706,6 +907,9 @@ class MainWindow(QMainWindow):
         try:
             self.sim_log_view.moveCursor(QTextCursor.End)
             self.sim_log_view.insertPlainText(text)
+            # Garante que a barra de rolagem fique sempre no final (mostrando as iterações mais recentes)
+            sb = self.sim_log_view.verticalScrollBar()
+            sb.setValue(sb.maximum())
             self.sim_log_view.moveCursor(QTextCursor.End)
         except Exception:
             pass
