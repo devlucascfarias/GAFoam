@@ -1,8 +1,13 @@
 import os
+import time
 import pyvista as pv
 from pyvistaqt import QtInteractor
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton, QLabel, QScrollArea, QCheckBox
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QComboBox, 
+                             QPushButton, QLabel, QScrollArea, QCheckBox, 
+                             QListWidget, QListWidgetItem, QSlider, QGroupBox, 
+                             QFormLayout, QFileDialog)
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QPen, QColor
 
 class STLViewer(QWidget):
     def __init__(self, parent=None):
@@ -19,6 +24,7 @@ class STLViewer(QWidget):
             self.layout.addWidget(QLabel(f"Erro ao inicializar visualizador 3D: {e}"))
             self.plotter = None
         self.actors = {}
+        self.meshes = {} # Armazena os objetos pyvista.PolyData para leitura de metadados
         
         # Paleta de cores para múltiplas geometrias
         self._mesh_colors = [
@@ -33,6 +39,7 @@ class STLViewer(QWidget):
             
         self.plotter.clear()
         self.actors = {}
+        self.meshes = {}
         
         for idx, (rel_path, full_path) in enumerate(files_list):
             try:
@@ -71,8 +78,9 @@ class STLViewer(QWidget):
 
                 if mesh and mesh.n_points > 0:
                     color = self._mesh_colors[idx % len(self._mesh_colors)]
-                    actor = self.plotter.add_mesh(mesh, color=color, show_edges=True, opacity=0.75, name=rel_path)
+                    actor = self.plotter.add_mesh(mesh, color=color, show_edges=True, opacity=0.8, name=rel_path)
                     self.actors[full_path] = actor
+                    self.meshes[full_path] = mesh
             except Exception as e:
                 print(f"Erro ao carregar mesh {rel_path}: {e}")
 
@@ -86,7 +94,6 @@ class STLViewer(QWidget):
         actor = self.actors.get(file_path)
         if actor:
             actor.SetVisibility(visible)
-            # Força o VTK a renderizar o frame atualizado
             self.plotter.render()
 
     def closeEvent(self, event):
@@ -96,7 +103,7 @@ class STLViewer(QWidget):
 
 
 class CaseGeometryWidget(QWidget):
-    """Painel lateral interativo que exibe a lista de geometrias e permite ocultá-las/exibi-las."""
+    """Painel lateral duplo com controle de árvore, visualizador 3D e menu de inspeção à direita."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -106,73 +113,142 @@ class CaseGeometryWidget(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # Painel lateral esquerdo (Sidebar) para os checkboxes
-        self.sidebar = QWidget(self)
-        self.sidebar.setFixedWidth(240)
-        self.sidebar.setStyleSheet(
+        # 1. Painel lateral esquerdo (Listagem de Geometrias)
+        self.sidebar_left = QWidget(self)
+        self.sidebar_left.setFixedWidth(200)
+        self.sidebar_left.setStyleSheet(
             "QWidget { background-color: #f1f3f5; border-right: 1px solid #dee2e6; }"
-            "QLabel { background-color: transparent; }"
-            "QCheckBox { background-color: transparent; }"
+            "QLabel { background-color: transparent; font-weight: bold; color: #495057; }"
+            "QListWidget { background-color: #ffffff; border: 1px solid #ced4da; border-radius: 4px; }"
         )
-        sidebar_layout = QVBoxLayout(self.sidebar)
-        sidebar_layout.setContentsMargins(8, 8, 8, 8)
+        left_layout = QVBoxLayout(self.sidebar_left)
+        left_layout.setContentsMargins(8, 8, 8, 8)
         
-        # Cabeçalho da barra lateral
-        header_layout = QHBoxLayout()
-        header_lbl = QLabel("Geometrias (.stl, .obj)")
-        header_lbl.setStyleSheet("font-weight: bold; font-size: 10pt; color: #495057;")
+        header_left = QHBoxLayout()
+        header_lbl_left = QLabel("Geometrias")
         self.btn_refresh = QPushButton("Atualizar")
-        self.btn_refresh.setStyleSheet("padding: 3px 8px; font-size: 8pt;")
+        self.btn_refresh.setStyleSheet("padding: 2px 6px; font-size: 8pt;")
         self.btn_refresh.clicked.connect(self.refresh_scan)
-        header_layout.addWidget(header_lbl, 1)
-        header_layout.addWidget(self.btn_refresh)
-        sidebar_layout.addLayout(header_layout)
+        header_left.addWidget(header_lbl_left, 1)
+        header_left.addWidget(self.btn_refresh)
+        left_layout.addLayout(header_left)
         
-        # Área de rolagem para os Checkboxes
-        self.scroll = QScrollArea(self)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setStyleSheet("border: none; background: transparent;")
+        self.mesh_list = QListWidget(self)
+        self.mesh_list.itemChanged.connect(self.on_mesh_item_changed)
+        self.mesh_list.currentItemChanged.connect(self.on_mesh_selection_changed)
+        left_layout.addWidget(self.mesh_list, 1)
         
-        self.scroll_content = QWidget()
-        self.scroll_content.setStyleSheet("background: transparent;")
-        self.checkboxes_layout = QVBoxLayout(self.scroll_content)
-        self.checkboxes_layout.setContentsMargins(0, 4, 0, 4)
-        self.checkboxes_layout.setSpacing(6)
-        self.checkboxes_layout.addStretch(1)
+        main_layout.addWidget(self.sidebar_left)
         
-        self.scroll.setWidget(self.scroll_content)
-        sidebar_layout.addWidget(self.scroll, 1)
-        
-        main_layout.addWidget(self.sidebar)
-        
-        # Visualizador 3D acoplado ao lado direito
+        # 2. Visualizador 3D (Centro)
         self.viewer = STLViewer(self)
         main_layout.addWidget(self.viewer, 1)
         
+        # 3. Painel lateral direito (Propriedades e Ferramentas)
+        self.sidebar_right = QWidget(self)
+        self.sidebar_right.setFixedWidth(260)
+        self.sidebar_right.setStyleSheet(
+            "QWidget { background-color: #f1f3f5; border-left: 1px solid #dee2e6; }"
+            "QGroupBox { font-weight: bold; color: #495057; border: 1px solid #ced4da; border-radius: 4px; margin-top: 8px; padding-top: 8px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; }"
+            "QLabel { background-color: transparent; color: #212529; }"
+        )
+        right_layout = QVBoxLayout(self.sidebar_right)
+        right_layout.setContentsMargins(8, 8, 8, 8)
+        right_layout.setSpacing(10)
+        
+        # Grupo 1: Estilização / Aparência
+        self.group_style = QGroupBox("Propriedades de Exibição", self)
+        style_layout = QFormLayout(self.group_style)
+        style_layout.setContentsMargins(8, 8, 8, 8)
+        style_layout.setSpacing(6)
+        
+        self.combo_rep = QComboBox()
+        self.combo_rep.addItem("Superfície + Linhas", "surface_edges")
+        self.combo_rep.addItem("Apenas Superfície", "surface")
+        self.combo_rep.addItem("Arestas (Wireframe)", "wireframe")
+        self.combo_rep.addItem("Nuvem de Pontos", "points")
+        self.combo_rep.currentIndexChanged.connect(self.change_representation)
+        
+        self.slider_opacity = QSlider(Qt.Horizontal)
+        self.slider_opacity.setRange(0, 100)
+        self.slider_opacity.setValue(80)
+        self.slider_opacity.valueChanged.connect(self.change_opacity)
+        
+        style_layout.addRow("Aparência:", self.combo_rep)
+        style_layout.addRow("Opacidade:", self.slider_opacity)
+        right_layout.addWidget(self.group_style)
+        
+        # Grupo 2: Informações da malha selecionada
+        self.group_info = QGroupBox("Informações Físicas", self)
+        info_layout = QFormLayout(self.group_info)
+        info_layout.setContentsMargins(8, 8, 8, 8)
+        info_layout.setSpacing(6)
+        
+        self.lbl_points = QLabel("-")
+        self.lbl_cells = QLabel("-")
+        self.lbl_bound_x = QLabel("-")
+        self.lbl_bound_y = QLabel("-")
+        self.lbl_bound_z = QLabel("-")
+        
+        info_layout.addRow("Pontos:", self.lbl_points)
+        info_layout.addRow("Células/Triâng.:", self.lbl_cells)
+        info_layout.addRow("Limites X:", self.lbl_bound_x)
+        info_layout.addRow("Limites Y:", self.lbl_bound_y)
+        info_layout.addRow("Limites Z:", self.lbl_bound_z)
+        right_layout.addWidget(self.group_info)
+        
+        # Grupo 3: Câmera e Captura
+        self.group_cam = QGroupBox("Câmera e Exportação", self)
+        cam_layout = QVBoxLayout(self.group_cam)
+        cam_layout.setContentsMargins(8, 8, 8, 8)
+        cam_layout.setSpacing(8)
+        
+        grid_cam = QHBoxLayout()
+        self.btn_iso = QPushButton("Iso")
+        self.btn_iso.clicked.connect(lambda: self.set_cam_view("iso"))
+        self.btn_xy = QPushButton("Top")
+        self.btn_xy.clicked.connect(lambda: self.set_cam_view("xy"))
+        self.btn_xz = QPushButton("Front")
+        self.btn_xz.clicked.connect(lambda: self.set_cam_view("xz"))
+        
+        grid_cam.addWidget(self.btn_iso)
+        grid_cam.addWidget(self.btn_xy)
+        grid_cam.addWidget(self.btn_xz)
+        cam_layout.addLayout(grid_cam)
+        
+        self.btn_screenshot = QPushButton("Capturar Tela")
+        self.btn_screenshot.clicked.connect(self.take_screenshot)
+        cam_layout.addWidget(self.btn_screenshot)
+        
+        right_layout.addWidget(self.group_cam)
+        right_layout.addStretch(1)
+        
+        main_layout.addWidget(self.sidebar_right)
+        
         self.current_case_path = None
-        self.checkboxes = {}
+        self.path_mapping = {} # Mapeia QListWidgetItem -> full_path
         self.scan_case(None)
 
     def scan_case(self, case_path):
-        """Varre o projeto, cria os checkboxes e plota todas as malhas."""
+        """Varre o projeto, popula a lista e renderiza as malhas."""
         self.current_case_path = case_path
         
-        # Remove checkboxes antigos de forma limpa
-        for cb in self.checkboxes.values():
-            cb.setParent(None)
-            cb.deleteLater()
-        self.checkboxes = {}
+        # Limpa estados
+        self.mesh_list.clear()
+        self.path_mapping = {}
         
-        while self.checkboxes_layout.count() > 0:
-            item = self.checkboxes_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-                
+        # Reseta labels
+        self.lbl_points.setText("-")
+        self.lbl_cells.setText("-")
+        self.lbl_bound_x.setText("-")
+        self.lbl_bound_y.setText("-")
+        self.lbl_bound_z.setText("-")
+        self.group_style.setEnabled(False)
+        self.group_info.setEnabled(False)
+        self.group_cam.setEnabled(False)
+        
         if not case_path or not os.path.isdir(case_path):
-            placeholder = QLabel("Abra um caso OpenFOAM")
-            placeholder.setStyleSheet("color: #8c9197; font-style: italic;")
-            self.checkboxes_layout.addWidget(placeholder)
-            self.checkboxes_layout.addStretch(1)
             self.btn_refresh.setEnabled(False)
             if self.viewer.plotter:
                 self.viewer.plotter.clear()
@@ -189,31 +265,155 @@ class CaseGeometryWidget(QWidget):
                         rel_path = os.path.relpath(full_path, case_path)
                         found_files.append((rel_path, full_path))
         except Exception as e:
-            print(f"Erro ao escanear pasta do caso: {e}")
+            print(f"Erro ao escanear geometria: {e}")
             
         if found_files:
             found_files.sort(key=lambda x: x[0].lower())
             
-            # Carrega e exibe todos de uma vez
+            # Carrega no visualizador 3D
             self.viewer.load_meshes(found_files)
             
-            # Cria um checkbox dinâmico para cada malha
+            # Popula QListWidget com itens marcáveis
+            self.mesh_list.blockSignals(True)
             for rel, full in found_files:
-                cb = QCheckBox(rel)
-                cb.setChecked(True)
-                cb.toggled.connect(lambda checked, path=full: self.viewer.set_mesh_visibility(path, checked))
-                self.checkboxes_layout.addWidget(cb)
-                self.checkboxes[full] = cb
-                
-            self.checkboxes_layout.addStretch(1)
+                item = QListWidgetItem(rel)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
+                item.setCheckState(Qt.Checked)
+                self.mesh_list.addItem(item)
+                self.path_mapping[item] = full
+            self.mesh_list.blockSignals(False)
+            
+            self.group_cam.setEnabled(True)
+            # Seleciona o primeiro por padrão para exibir propriedades
+            if self.mesh_list.count() > 0:
+                self.mesh_list.setCurrentRow(0)
         else:
-            placeholder = QLabel("Nenhuma geometria encontrada")
-            placeholder.setStyleSheet("color: #8c9197; font-style: italic;")
-            self.checkboxes_layout.addWidget(placeholder)
-            self.checkboxes_layout.addStretch(1)
             if self.viewer.plotter:
                 self.viewer.plotter.clear()
 
     def refresh_scan(self):
         if self.current_case_path:
             self.scan_case(self.current_case_path)
+
+    def on_mesh_item_changed(self, item):
+        """Oculta/exibe malha com base no checkbox."""
+        full_path = self.path_mapping.get(item)
+        if full_path:
+            is_checked = (item.checkState() == Qt.Checked)
+            self.viewer.set_mesh_visibility(full_path, is_checked)
+
+    def on_mesh_selection_changed(self, current, previous):
+        """Atualiza a barra lateral direita com as propriedades da malha selecionada."""
+        full_path = self.path_mapping.get(current)
+        if not full_path:
+            self.group_style.setEnabled(False)
+            self.group_info.setEnabled(False)
+            return
+            
+        self.group_style.setEnabled(True)
+        self.group_info.setEnabled(True)
+        
+        # 1. Recupera o mesh e atualiza metadados
+        mesh = self.viewer.meshes.get(full_path)
+        if mesh:
+            self.lbl_points.setText(f"{mesh.n_points:,}")
+            self.lbl_cells.setText(f"{mesh.n_cells:,}")
+            b = mesh.bounds # (xmin, xmax, ymin, ymax, zmin, zmax)
+            self.lbl_bound_x.setText(f"[{b[0]:.3f}, {b[1]:.3f}] m")
+            self.lbl_bound_y.setText(f"[{b[2]:.3f}, {b[3]:.3f}] m")
+            self.lbl_bound_z.setText(f"[{b[4]:.3f}, {b[5]:.3f}] m")
+        else:
+            self.lbl_points.setText("Erro")
+            self.lbl_cells.setText("Erro")
+            self.lbl_bound_x.setText("-")
+            self.lbl_bound_y.setText("-")
+            self.lbl_bound_z.setText("-")
+            
+        # 2. Recupera o actor e sincroniza controles de aparência
+        actor = self.viewer.actors.get(full_path)
+        if actor:
+            self.slider_opacity.blockSignals(True)
+            self.slider_opacity.setValue(int(actor.GetProperty().GetOpacity() * 100))
+            self.slider_opacity.blockSignals(False)
+            
+            # Sincroniza combobox de representação
+            rep = actor.GetProperty().GetRepresentation()
+            self.combo_rep.blockSignals(True)
+            if rep == 0: # Points
+                self.combo_rep.setCurrentIndex(3)
+            elif rep == 1: # Wireframe
+                self.combo_rep.setCurrentIndex(2)
+            elif rep == 2: # Surface
+                if actor.GetProperty().GetEdgeVisibility():
+                    self.combo_rep.setCurrentIndex(0)
+                else:
+                    self.combo_rep.setCurrentIndex(1)
+            self.combo_rep.blockSignals(False)
+
+    def change_representation(self):
+        """Altera o estilo de renderização da malha selecionada."""
+        current_item = self.mesh_list.currentItem()
+        full_path = self.path_mapping.get(current_item)
+        actor = self.viewer.actors.get(full_path) if full_path else None
+        
+        if actor:
+            rep_type = self.combo_rep.currentData()
+            prop = actor.GetProperty()
+            
+            if rep_type == "surface_edges":
+                prop.SetRepresentationToSurface()
+                prop.SetEdgeVisibility(True)
+            elif rep_type == "surface":
+                prop.SetRepresentationToSurface()
+                prop.SetEdgeVisibility(False)
+            elif rep_type == "wireframe":
+                prop.SetRepresentationToWireframe()
+            elif rep_type == "points":
+                prop.SetRepresentationToPoints()
+                
+            self.viewer.plotter.render()
+
+    def change_opacity(self, val):
+        """Altera a transparência da malha selecionada."""
+        current_item = self.mesh_list.currentItem()
+        full_path = self.path_mapping.get(current_item)
+        actor = self.viewer.actors.get(full_path) if full_path else None
+        
+        if actor:
+            actor.GetProperty().SetOpacity(val / 100.0)
+            self.viewer.plotter.render()
+
+    def set_cam_view(self, view):
+        """Muda o ângulo de visualização da câmera."""
+        if not self.viewer.plotter:
+            return
+        if view == "iso":
+            self.viewer.plotter.view_isometric()
+        elif view == "xy":
+            self.viewer.plotter.view_xy()
+        elif view == "xz":
+            self.viewer.plotter.view_xz()
+        self.viewer.plotter.reset_camera()
+
+    def take_screenshot(self):
+        """Salva uma captura da janela 3D na pasta do caso."""
+        if not self.viewer.plotter or not self.current_case_path:
+            return
+            
+        timestamp = int(time.time())
+        default_name = f"screenshot_geometria_{timestamp}.png"
+        
+        # Abre diálogo para salvar
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Salvar Captura de Tela", 
+            os.path.join(self.current_case_path, default_name),
+            "Imagens PNG (*.png)"
+        )
+        
+        if file_path:
+            try:
+                self.viewer.plotter.screenshot(file_path)
+                if hasattr(self.main_window, 'log'):
+                    self.main_window.log(f"Captura de tela salva com sucesso em: {file_path}\n")
+            except Exception as e:
+                print(f"Erro ao salvar screenshot: {e}")
