@@ -14,8 +14,6 @@ from residuals import ResidualsWidget
 from menus import setup_menus
 from handlers import make_stdout_handler, make_stderr_handler, make_finished_handler
 from terminal import TerminalWidget
-from bc_manager import BCManagerWidget
-from results_tab import ResultsWidget
 
 
 class MainWindow(QMainWindow):
@@ -30,12 +28,6 @@ class MainWindow(QMainWindow):
 
         self.geom_view = CaseGeometryWidget(parent=self)
         self.editor_tabs.addTab(self.geom_view, "Geometria")
-
-        self.bc_view = BCManagerWidget(parent=self)
-        self.editor_tabs.addTab(self.bc_view, "Condições Limite")
-
-        self.results_view = ResultsWidget(parent=self)
-        self.editor_tabs.addTab(self.results_view, "Resultados")
 
         self.path_to_editor = {}
         self.editor_to_path = {}
@@ -240,8 +232,6 @@ class MainWindow(QMainWindow):
         self.file_browser.set_root(dir_path)
         self.current_case = dir_path
         self.geom_view.scan_case(dir_path)
-        self.bc_view.scan_zero_dir()
-        self.results_view.scan_postprocessing()
 
         QMessageBox.information(self, "Sucesso", f"Caso OpenFOAM aberto com sucesso!\n{dir_path}")
     def on_file_clicked(self, index):
@@ -336,9 +326,9 @@ class MainWindow(QMainWindow):
         widget = self.editor_tabs.widget(index)
         if widget is None:
             return
-        if widget in (self.geom_view, self.bc_view, self.results_view):
+        if widget == self.geom_view:
             self.editor_tabs.removeTab(index)
-            # Não destrói essas abas permanentes para que possam ser restauradas
+            # Não destrói a aba de geometria
             return
         editor = widget.editor if hasattr(widget, 'editor') else widget
         path = self.editor_to_path.get(editor)
