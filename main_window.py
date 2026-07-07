@@ -121,6 +121,11 @@ class MainWindow(QMainWindow):
             snappy_act.setStatusTip('Executar snappyHexMesh')
             snappy_act.triggered.connect(self.run_snappyHexMesh)
             self.toolbar.addAction(snappy_act)
+
+            geom_act = QAction('Geometria', self)
+            geom_act.setStatusTip('Visualizar a geometria do caso')
+            geom_act.triggered.connect(self.focus_geometry_tab)
+            self.toolbar.addAction(geom_act)
         except Exception:
             pass
 
@@ -199,6 +204,10 @@ class MainWindow(QMainWindow):
             self.console_view.moveCursor(QTextCursor.End)
         except Exception:
             pass
+
+    def focus_geometry_tab(self):
+        """Foca na aba Geometria no painel inferior."""
+        self.show_tab("Geometria")
 
     def show_tab(self, name):
         """Foca em uma aba específica pelo nome."""
