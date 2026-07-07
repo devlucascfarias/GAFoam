@@ -91,6 +91,7 @@ class ResidualsWidget(QWidget):
         self.history = {}
         self.time_history = {}
         self.series_dict = {}
+        self.series_visible = {}
         self.max_points = 200
         
         # Paleta de cores moderna para curvas
@@ -300,6 +301,7 @@ class ResidualsWidget(QWidget):
         # Inverte visibilidade da curva
         visible = not series.isVisible()
         series.setVisible(visible)
+        self.series_visible[series.name()] = visible
         marker.setVisible(True)
         
         # Opacidade do marcador reflete a visibilidade
