@@ -348,7 +348,7 @@ class CaseGeometryWidget(QWidget):
                     self.combo_rep.setCurrentIndex(1)
             self.combo_rep.blockSignals(False)
 
-    def change_representation(self):
+    def change_representation(self, index=None):
         """Altera o estilo de renderização da malha selecionada."""
         current_item = self.mesh_list.currentItem()
         full_path = current_item.data(Qt.UserRole) if current_item else None
