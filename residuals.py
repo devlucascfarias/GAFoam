@@ -33,8 +33,8 @@ class ResidualsWidget(QWidget):
         self.scale_selector.currentIndexChanged.connect(self._refresh)
 
         self.xaxis_selector = QComboBox()
-        self.xaxis_selector.addItem("Eixo X: Iterações", "iterations")
         self.xaxis_selector.addItem("Eixo X: Tempo", "time")
+        self.xaxis_selector.addItem("Eixo X: Iterações", "iterations")
         self.xaxis_selector.currentIndexChanged.connect(self._refresh)
 
         self.clear_btn = QPushButton("Limpar")
