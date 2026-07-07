@@ -12,7 +12,7 @@ except Exception:
 class ResidualsWidget(QWidget):
     """Painel para exibir resíduos do solver em tempo real.
 
-    Permite plotar em função de iterações ou do tempo da simulação.
+    Permite plotar em função de iterações ou do tempo da simulação com alta performance.
     """
 
     def __init__(self, parent=None):
@@ -30,12 +30,12 @@ class ResidualsWidget(QWidget):
         self.scale_selector = QComboBox()
         self.scale_selector.addItem("Escala: Linear", "linear")
         self.scale_selector.addItem("Escala: Logarítmica", "loglog")
-        self.scale_selector.currentIndexChanged.connect(self._refresh)
+        self.scale_selector.currentIndexChanged.connect(self._on_settings_changed)
 
         self.xaxis_selector = QComboBox()
         self.xaxis_selector.addItem("Eixo X: Tempo", "time")
         self.xaxis_selector.addItem("Eixo X: Iterações", "iterations")
-        self.xaxis_selector.currentIndexChanged.connect(self._refresh)
+        self.xaxis_selector.currentIndexChanged.connect(self._on_settings_changed)
 
         self.clear_btn = QPushButton("Limpar")
         self.clear_btn.clicked.connect(self.clear_history)
@@ -52,8 +52,6 @@ class ResidualsWidget(QWidget):
         layout.addWidget(self.canvas)
 
         self.ax = self.figure.add_subplot(111)
-        self.ax.set_xlabel('Iterações')
-        self.ax.set_ylabel('Residual')
         self.lines = {}
         self.history = {}
         self.time_history = {}
@@ -68,13 +66,13 @@ class ResidualsWidget(QWidget):
 
         self._setup_axes()
 
-        self._timer = QTimer(self)
-        self._timer.setInterval(350)
-        self._timer.timeout.connect(self._refresh)
-        self._timer.start()
+    def _on_settings_changed(self):
+        """Recria o gráfico a partir do zero quando as configurações de eixos/escala mudam."""
+        self._setup_axes()
+        self._refresh()
 
     def update_residuals(self, res_dict: dict, sim_time=None):
-        """Adiciona novos resíduos. Se sim_time for informado, armazena no histórico de tempo."""
+        """Adiciona novos resíduos e atualiza o gráfico de forma incremental e otimizada."""
         if not MATPLOTLIB_AVAILABLE:
             return
         for name, val in res_dict.items():
@@ -92,6 +90,9 @@ class ResidualsWidget(QWidget):
             if len(self.history[name]) > self.max_points:
                 self.history[name] = self.history[name][-self.max_points:]
                 self.time_history[name] = self.time_history[name][-self.max_points:]
+        
+        # Dispara redesenho apenas ao receber novos dados
+        self._refresh()
 
     def clear_history(self):
         if not MATPLOTLIB_AVAILABLE:
@@ -101,7 +102,8 @@ class ResidualsWidget(QWidget):
         self.lines = {}
         self.series_visible = {}
         self._legend_pick_map = {}
-        self._refresh()
+        self._setup_axes()
+        self.canvas.draw_idle()
 
     def _setup_axes(self):
         if not MATPLOTLIB_AVAILABLE:
@@ -110,6 +112,9 @@ class ResidualsWidget(QWidget):
         x_mode = self.xaxis_selector.currentData()
         
         self.ax.clear()
+        self.lines = {} # Limpa cache de linhas antigas do Matplotlib
+        self._legend_pick_map = {}
+        
         self.figure.patch.set_facecolor("#f4f4f4")
         self.ax.set_facecolor("#ffffff")
         
@@ -134,13 +139,11 @@ class ResidualsWidget(QWidget):
     def _refresh(self):
         if not MATPLOTLIB_AVAILABLE:
             return
-        self._setup_axes()
         mode = self.scale_selector.currentData()
         x_mode = self.xaxis_selector.currentData()
         plotted = 0
         plotted_names = []
-        plotted_lines = []
-        self._legend_pick_map = {}
+        
         for idx, (name, hist) in enumerate(self.history.items()):
             if len(hist) < 2:
                 continue
@@ -152,21 +155,31 @@ class ResidualsWidget(QWidget):
                     x = list(range(1, len(hist) + 1))
                 else:
                     x = list(range(len(hist)))
-                    
-            color = self._colors[idx % len(self._colors)]
-            line, = self.ax.plot(x, hist, label=name, linewidth=1.8, color=color)
-            line.set_visible(self.series_visible.get(name, True))
-            self.lines[name] = line
+            
+            # Otimização crucial: altera dados in-place se a linha já existir
+            if name in self.lines:
+                line = self.lines[name]
+                line.set_data(x, hist)
+                line.set_visible(self.series_visible.get(name, True))
+            else:
+                color = self._colors[len(self.lines) % len(self._colors)]
+                line, = self.ax.plot(x, hist, label=name, linewidth=1.8, color=color)
+                line.set_visible(self.series_visible.get(name, True))
+                self.lines[name] = line
+                
             plotted_names.append(name)
-            plotted_lines.append(line)
             plotted += 1
             
         if plotted:
+            self.ax.relim()
+            self.ax.autoscale_view()
+            
             legend = self.ax.legend(loc='best', frameon=True, framealpha=0.85, fontsize=8)
             legend.get_frame().set_facecolor("#f4f4f4")
             legend.get_frame().set_edgecolor("#c6c6c6")
             legend_lines = legend.get_lines()
             legend_texts = legend.get_texts()
+            self._legend_pick_map = {}
             for i, name in enumerate(plotted_names):
                 visible = self.series_visible.get(name, True)
                 if i < len(legend_lines):
@@ -180,7 +193,7 @@ class ResidualsWidget(QWidget):
                     leg_text.set_alpha(1.0 if visible else 0.45)
                     leg_text.set_color("#161616")
                     self._legend_pick_map[leg_text] = name
-        self.figure.tight_layout()
+                    
         self.canvas.draw_idle()
 
     def _on_pick(self, event):
@@ -189,4 +202,5 @@ class ResidualsWidget(QWidget):
             return
         name = self._legend_pick_map[artist]
         self.series_visible[name] = not self.series_visible.get(name, True)
+        self._refresh()
         self._refresh()
