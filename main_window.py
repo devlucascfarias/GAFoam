@@ -9,7 +9,7 @@ from PySide6.QtGui import QAction, QIcon, QFont, QKeySequence, QPalette, QColor,
 from PySide6.QtCore import QProcess, Qt, QSize, QRegularExpression, QRect, QTimer
 from editor import CodeEditor, SimpleHighlighter
 from filebrowser import FileBrowser
-from stl_viewer import STLViewer
+from stl_viewer import STLViewer, CaseGeometryWidget
 from residuals import ResidualsWidget
 from menus import setup_menus
 from handlers import make_stdout_handler, make_stderr_handler, make_finished_handler
@@ -49,6 +49,10 @@ class MainWindow(QMainWindow):
             "font-size: 10pt; line-height: 1.4; border: none; padding: 6px;"
         )
         self.tab_widget.addTab(self.sim_log_view, "Simulação")
+
+        # 3. Geometria (Visualização de STL/OBJ do Caso)
+        self.geom_view = CaseGeometryWidget(parent=self)
+        self.tab_widget.addTab(self.geom_view, "Geometria")
 
         self.residuals_view = ResidualsWidget(parent=self)
 
@@ -226,6 +230,7 @@ class MainWindow(QMainWindow):
         self.show_tab("Console")
         self.file_browser.set_root(dir_path)
         self.current_case = dir_path
+        self.geom_view.scan_case(dir_path)
 
         QMessageBox.information(self, "Sucesso", f"Caso OpenFOAM aberto com sucesso!\n{dir_path}")
     def on_file_clicked(self, index):
