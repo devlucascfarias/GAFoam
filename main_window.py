@@ -4,7 +4,7 @@ import signal
 import subprocess
 import glob
 import time
-from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QTextEdit, QPlainTextEdit, QVBoxLayout, QWidget, QMenuBar, QMenu, QSplitter, QTabWidget, QFileDialog, QMessageBox, QToolBar, QLabel, QProgressBar
+from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QTextEdit, QPlainTextEdit, QVBoxLayout, QHBoxLayout, QWidget, QMenuBar, QMenu, QSplitter, QTabWidget, QFileDialog, QMessageBox, QToolBar, QLabel, QProgressBar, QDockWidget, QFormLayout, QDoubleSpinBox, QHeaderView, QTableWidget, QTableWidgetItem, QToolButton
 from PySide6.QtGui import QAction, QIcon, QFont, QKeySequence, QPalette, QColor, QTextCharFormat, QPainter, QTextCursor
 from PySide6.QtCore import QProcess, Qt, QSize, QRegularExpression, QRect, QTimer
 from editor import CodeEditor, SimpleHighlighter, EditorContainerWidget
@@ -44,14 +44,26 @@ class MainWindow(QMainWindow):
         )
         self.tab_widget.addTab(self.console_view, "Console")
 
-        # 2. Simulação (Visualização do Solver)
+        # 2. Simulação (Visualização do Solver com Monitor de Convergência acoplado)
+        sim_container = QWidget(parent=self)
+        sim_layout = QHBoxLayout(sim_container)
+        sim_layout.setContentsMargins(0, 0, 0, 0)
+        sim_layout.setSpacing(0)
+
         self.sim_log_view = QTextEdit(parent=self)
         self.sim_log_view.setReadOnly(True)
         self.sim_log_view.setStyleSheet(
             "font-family: 'Consolas', 'Monaco', 'Courier New', monospace; "
             "font-size: 10pt; line-height: 1.4; border: none; padding: 6px;"
         )
-        self.tab_widget.addTab(self.sim_log_view, "Simulação")
+        sim_layout.addWidget(self.sim_log_view, 2)
+
+        self.convergence_monitor = ConvergenceMonitorWidget(parent=self)
+        self.convergence_monitor.setFixedWidth(280)
+        self.convergence_monitor.setStyleSheet("background-color: #f8f9fa; border-left: 1px solid #dee2e6;")
+        sim_layout.addWidget(self.convergence_monitor)
+
+        self.tab_widget.addTab(sim_container, "Simulação")
 
         self.residuals_view = ResidualsWidget(parent=self)
 
@@ -69,6 +81,23 @@ class MainWindow(QMainWindow):
         right_splitter.setStretchFactor(1, 1)
 
         setup_menus(self)
+
+        # 3. Dock Widget para controlDict (Parâmetros do Caso)
+        self.control_dock = ControlDictDockWidget(self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.control_dock)
+        
+        # Sincroniza o toggleViewAction com o menu "Exibir"
+        toggle_dock_act = self.control_dock.toggleViewAction()
+        toggle_dock_act.setText("Parâmetros do Caso (controlDict)")
+        
+        view_menu = None
+        for action in self.menuBar().actions():
+            if action.text() == "Exibir":
+                view_menu = action.menu()
+                break
+        if not view_menu:
+            view_menu = self.menuBar().addMenu("Exibir")
+        view_menu.addAction(toggle_dock_act)
 
         try:
             self.toolbar = QToolBar("Run")
@@ -120,6 +149,41 @@ class MainWindow(QMainWindow):
             snappy_act.setStatusTip('Executar snappyHexMesh')
             snappy_act.triggered.connect(self.run_snappyHexMesh)
             self.toolbar.addAction(snappy_act)
+
+            self.toolbar.addSeparator()
+
+            # Botão de dropdown para Utilitários extras
+            self.util_btn = QToolButton(self)
+            self.util_btn.setText("Utilitários ⚡")
+            self.util_btn.setPopupMode(QToolButton.InstantPopup)
+            self.util_btn.setStyleSheet(
+                "QToolButton { padding: 4px 8px; border: 1px solid #ced4da; border-radius: 4px; background-color: #ffffff; color: #212529; font-weight: bold; }"
+                "QToolButton::menu-indicator { image: none; }"
+                "QToolButton:hover { background-color: #e9ecef; }"
+            )
+            
+            util_menu = QMenu(self)
+            
+            decomp_act = QAction("decomposePar (Decompor)", self)
+            decomp_act.triggered.connect(self.run_decomposePar)
+            util_menu.addAction(decomp_act)
+            
+            recon_act = QAction("reconstructPar (Reconstruir)", self)
+            recon_act.triggered.connect(self.run_reconstructPar)
+            util_menu.addAction(recon_act)
+            
+            yplus_act = QAction("yPlus (Inspecionar Parede)", self)
+            yplus_act.triggered.connect(self.run_yPlus)
+            util_menu.addAction(yplus_act)
+            
+            util_menu.addSeparator()
+            
+            clean_act = QAction("Limpar Caso (Allclean)", self)
+            clean_act.triggered.connect(self.run_allclean)
+            util_menu.addAction(clean_act)
+            
+            self.util_btn.setMenu(util_menu)
+            self.toolbar.addWidget(self.util_btn)
         except Exception:
             pass
 
@@ -232,6 +296,8 @@ class MainWindow(QMainWindow):
         self.file_browser.set_root(dir_path)
         self.current_case = dir_path
         self.geom_view.scan_case(dir_path)
+        self.control_dock.load_case(dir_path)
+        self.convergence_monitor.load_case(dir_path)
 
         QMessageBox.information(self, "Sucesso", f"Caso OpenFOAM aberto com sucesso!\n{dir_path}")
     def on_file_clicked(self, index):
@@ -675,6 +741,8 @@ class MainWindow(QMainWindow):
 
         if res_dict:
             self.residuals_view.update_residuals(res_dict, getattr(self, 'current_sim_time', None))
+            for name, val in res_dict.items():
+                self.convergence_monitor.update_residual(name, val)
 
     def _run_command_in_case(self, command, args=None, follow_solver_log=False):
         from PySide6.QtWidgets import QMessageBox
@@ -824,6 +892,20 @@ class MainWindow(QMainWindow):
 
     def run_snappyHexMesh(self):
         self._run_command_in_case('snappyHexMesh')
+
+    def run_decomposePar(self):
+        self._run_command_in_case('decomposePar')
+
+    def run_reconstructPar(self):
+        self._run_command_in_case('reconstructPar')
+
+    def run_yPlus(self):
+        self._run_command_in_case('yPlus')
+
+    def run_allclean(self):
+        if self.current_case:
+            cmd = "./Allclean" if os.path.exists(os.path.join(self.current_case, "Allclean")) else "foamCleanTutorials"
+            self._run_command_in_case(cmd)
 
     def run_simulation(self):
         """Executa `./Allrun` dentro do diretório do caso, se existir.
@@ -1005,6 +1087,262 @@ class MainWindow(QMainWindow):
             except ValueError:
                 pass
         return targets
+
+class ConvergenceMonitorWidget(QWidget):
+    """Monitor de convergência em tempo real acoplado à aba de simulação."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        
+        title = QLabel("Status de Convergência", self)
+        title.setStyleSheet("font-weight: bold; color: #495057; font-size: 10pt;")
+        layout.addWidget(title)
+        
+        self.table = QTableWidget(self)
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Variável", "Atual", "Meta"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setAlternatingRowColors(True)
+        self.table.setStyleSheet(
+            "QTableWidget { gridline-color: #dee2e6; border: 1px solid #ced4da; border-radius: 4px; font-size: 8.5pt; }"
+            "QHeaderView::section { background-color: #f1f3f5; border: 1px solid #dee2e6; font-weight: bold; padding: 2px; }"
+        )
+        layout.addWidget(self.table)
+        self.targets = {}
+
+    def load_case(self, case_path):
+        """Carrega limites de convergência do fvSolution."""
+        self.targets = self.parse_residual_controls(case_path)
+        self.table.setRowCount(0)
+
+    def parse_residual_controls(self, case_path):
+        """Analisa tolerâncias de residualControl no fvSolution."""
+        import re
+        sol_path = os.path.join(case_path, "system", "fvSolution")
+        if not os.path.isfile(sol_path):
+            return {}
+        try:
+            with open(sol_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            match = re.search(r'residualControl\s*\{', content)
+            if not match:
+                return {}
+            start = match.end()
+            brace = 1
+            end = -1
+            for idx in range(start, len(content)):
+                c = content[idx]
+                if c == '{':
+                    brace += 1
+                elif c == '}':
+                    brace -= 1
+                    if brace == 0:
+                        end = idx
+                        break
+            if end == -1:
+                return {}
+            block = content[start:end]
+            targets = {}
+            for m in re.finditer(r'([a-zA-Z0-9_"\(\)\|\s\-]+)\s+([0-9eE\.\-]+)\s*;', block):
+                key = m.group(1).strip().strip('"').strip("'")
+                targets[key] = float(m.group(2))
+            return targets
+        except Exception:
+            return {}
+
+    def update_residual(self, name, val):
+        """Atualiza a tabela com o resíduo mais recente de cada variável."""
+        import re
+        row = -1
+        for r in range(self.table.rowCount()):
+            if self.table.item(r, 0).text() == name:
+                row = r
+                break
+        if row == -1:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(name))
+            
+            # Procura tolerância correspondente
+            target = 1e-5
+            for key, target_val in self.targets.items():
+                try:
+                    if re.search(key, name):
+                        target = target_val
+                        break
+                except Exception:
+                    if key in name:
+                        target = target_val
+                        break
+            self.table.setItem(row, 2, QTableWidgetItem(f"{target:.1e}"))
+            
+        item_val = QTableWidgetItem(f"{val:.2e}")
+        
+        # Compara com a meta
+        try:
+            target = float(self.table.item(row, 2).text())
+        except ValueError:
+            target = 1e-5
+            
+        if val <= target:
+            item_val.setForeground(QColor("#137333")) # Verde
+            item_val.setToolTip("Convergido!")
+        else:
+            item_val.setForeground(QColor("#d9381e")) # Vermelho
+            
+        self.table.setItem(row, 1, item_val)
+
+
+class ControlDictDockWidget(QDockWidget):
+    """Painel lateral dockable para inspecionar e alterar parâmetros do controlDict."""
+    
+    def __init__(self, parent=None):
+        super().__init__("Parâmetros do Caso (controlDict)", parent)
+        self.main_window = parent
+        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        
+        container = QWidget()
+        container.setStyleSheet("background-color: #f8f9fa; border-top: 1px solid #dee2e6;")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(10)
+        
+        form = QFormLayout()
+        self.txt_app = QLabel("-")
+        self.txt_app.setStyleSheet("font-weight: bold; color: #495057;")
+        form.addRow("Solver:", self.txt_app)
+        
+        self.spin_endtime = QDoubleSpinBox()
+        self.spin_endtime.setRange(0, 1e9)
+        self.spin_endtime.setDecimals(4)
+        form.addRow("Tempo Final:", self.spin_endtime)
+        
+        self.spin_deltat = QDoubleSpinBox()
+        self.spin_deltat.setRange(1e-12, 1e9)
+        self.spin_deltat.setDecimals(8)
+        form.addRow("Passo deltaT:", self.spin_deltat)
+        
+        self.spin_interval = QDoubleSpinBox()
+        self.spin_interval.setRange(0, 1e9)
+        self.spin_interval.setDecimals(4)
+        form.addRow("Gravação:", self.spin_interval)
+        
+        layout.addLayout(form)
+        
+        self.btn_save = QPushButton("Salvar Alterações")
+        self.btn_save.setStyleSheet(
+            "background-color: #1a73e8; color: white; font-weight: bold; padding: 6px 12px; border-radius: 4px;"
+        )
+        self.btn_save.clicked.connect(self.save_parameters)
+        layout.addWidget(self.btn_save)
+        
+        layout.addStretch(1)
+        self.setWidget(container)
+        
+        self.current_case_path = None
+        self.setEnabled(False)
+
+    def load_case(self, case_path):
+        import re
+        self.current_case_path = case_path
+        if not case_path:
+            self.setEnabled(False)
+            return
+            
+        params = self.read_control_dict(case_path)
+        if params:
+            self.setEnabled(True)
+            self.txt_app.setText(params.get("application", "-"))
+            
+            try:
+                self.spin_endtime.setValue(float(params.get("endTime", "0")))
+            except ValueError:
+                self.spin_endtime.setValue(0)
+                
+            try:
+                self.spin_deltat.setValue(float(params.get("deltaT", "0.001")))
+            except ValueError:
+                self.spin_deltat.setValue(0.001)
+                
+            try:
+                self.spin_interval.setValue(float(params.get("writeInterval", "100")))
+            except ValueError:
+                self.spin_interval.setValue(100)
+        else:
+            self.setEnabled(False)
+
+    def read_control_dict(self, case_path):
+        import re
+        dict_path = os.path.join(case_path, "system", "controlDict")
+        if not os.path.isfile(dict_path):
+            return {}
+        try:
+            with open(dict_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            clean = re.sub(r'//.*', '', content)
+            clean = re.sub(r'/\*.*?\*/', '', clean, flags=re.DOTALL)
+            
+            res = {}
+            for key in ("endTime", "deltaT", "writeInterval", "application"):
+                m = re.search(rf'\b{key}\s+([^;]+);', clean)
+                if m:
+                    res[key] = m.group(1).strip()
+            return res
+        except Exception:
+            return {}
+
+    def save_parameters(self):
+        if not self.current_case_path:
+            return
+            
+        values = {
+            "endTime": str(self.spin_endtime.value()),
+            "deltaT": str(self.spin_deltat.value()),
+            "writeInterval": str(self.spin_interval.value())
+        }
+        
+        if self.write_control_dict(self.current_case_path, values):
+            QMessageBox.information(self, "Sucesso", "Parâmetros salvos com sucesso!")
+            if hasattr(self.main_window, 'log'):
+                self.main_window.log("Parâmetros do controlDict atualizados.\n")
+                
+            # Força recarga do arquivo no editor se estiver aberto
+            dict_path = os.path.join(self.current_case_path, "system", "controlDict")
+            if hasattr(self.main_window, 'path_to_editor'):
+                editor = self.main_window.path_to_editor.get(dict_path)
+                if editor:
+                    try:
+                        with open(dict_path, 'r', encoding='utf-8') as f:
+                            editor.blockSignals(True)
+                            editor.setPlainText(f.read())
+                            editor.blockSignals(False)
+                    except Exception:
+                        pass
+        else:
+            QMessageBox.critical(self, "Erro", "Falha ao atualizar controlDict.")
+
+    def write_control_dict(self, case_path, values):
+        import re
+        dict_path = os.path.join(case_path, "system", "controlDict")
+        if not os.path.isfile(dict_path):
+            return False
+        try:
+            with open(dict_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            for key, val in values.items():
+                pattern = rf'(\b{key}\s+)[^;]+(\s*;)'
+                content = re.sub(pattern, rf'\g<1>{val}\g<2>', content)
+                
+            with open(dict_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return True
+        except Exception:
+            return False
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

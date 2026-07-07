@@ -348,11 +348,147 @@ class SimpleHighlighter(QSyntaxHighlighter):
             self.setFormat(start, end - start, self.cppDelimiterFormat)
 
 
-from PySide6.QtWidgets import QVBoxLayout, QLabel
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QCheckBox, QPushButton
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QKeySequence, QShortcut, QTextDocument
+
+class FindReplaceBar(QWidget):
+    """Barra de pesquisa e substituição moderna acoplada ao editor."""
+    
+    def __init__(self, editor, parent=None):
+        super().__init__(parent)
+        self.editor = editor
+        
+        self.setStyleSheet(
+            "QWidget { background-color: #f8f9fa; border-bottom: 1px solid #ced4da; }"
+            "QLineEdit { border: 1px solid #ced4da; border-radius: 4px; padding: 3px 6px; background-color: #ffffff; color: #212529; }"
+            "QPushButton { padding: 3px 8px; border: 1px solid #ced4da; border-radius: 4px; background-color: #ffffff; color: #212529; }"
+            "QPushButton:hover { background-color: #e9ecef; }"
+            "QCheckBox { color: #495057; }"
+            "QLabel { color: #495057; }"
+        )
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+        
+        # Linha 1: Campo de Busca e botões
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("Buscar:", self))
+        self.txt_find = QLineEdit(self)
+        self.txt_find.setPlaceholderText("Procurar texto...")
+        self.txt_find.textChanged.connect(self.find_next)
+        row1.addWidget(self.txt_find, 1)
+        
+        self.btn_prev = QPushButton("Anterior", self)
+        self.btn_prev.clicked.connect(self.find_prev)
+        row1.addWidget(self.btn_prev)
+        
+        self.btn_next = QPushButton("Próximo", self)
+        self.btn_next.clicked.connect(self.find_next)
+        row1.addWidget(self.btn_next)
+        
+        self.chk_case = QCheckBox("Case sensitive", self)
+        row1.addWidget(self.chk_case)
+        
+        self.chk_word = QCheckBox("Palavra inteira", self)
+        row1.addWidget(self.chk_word)
+        
+        layout.addLayout(row1)
+        
+        # Linha 2: Campo de Substituição e botões de ação
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("Substituir:", self))
+        self.txt_replace = QLineEdit(self)
+        self.txt_replace.setPlaceholderText("Substituir por...")
+        row2.addWidget(self.txt_replace, 1)
+        
+        self.btn_replace = QPushButton("Substituir", self)
+        self.btn_replace.clicked.connect(self.replace)
+        row2.addWidget(self.btn_replace)
+        
+        self.btn_replace_all = QPushButton("Todos", self)
+        self.btn_replace_all.clicked.connect(self.replace_all)
+        row2.addWidget(self.btn_replace_all)
+        
+        self.btn_close = QPushButton("Fechar (Esc)", self)
+        self.btn_close.clicked.connect(self.hide_bar)
+        row2.addWidget(self.btn_close)
+        
+        layout.addLayout(row2)
+        
+        # Atalho Esc para fechar barra
+        self.esc_shortcut = QShortcut(QKeySequence("Esc"), self)
+        self.esc_shortcut.activated.connect(self.hide_bar)
+
+    def get_find_flags(self):
+        flags = QTextDocument.FindFlags()
+        if self.chk_case.isChecked():
+            flags |= QTextDocument.FindCaseSensitively
+        if self.chk_word.isChecked():
+            flags |= QTextDocument.FindWholeWords
+        return flags
+
+    def find_next(self):
+        query = self.txt_find.text()
+        if not query:
+            return
+        flags = self.get_find_flags()
+        found = self.editor.find(query, flags)
+        if not found:
+            # Wrap around (volta ao início)
+            cursor = self.editor.textCursor()
+            cursor.movePosition(cursor.Start)
+            self.editor.setTextCursor(cursor)
+            self.editor.find(query, flags)
+
+    def find_prev(self):
+        query = self.txt_find.text()
+        if not query:
+            return
+        flags = self.get_find_flags() | QTextDocument.FindBackward
+        found = self.editor.find(query, flags)
+        if not found:
+            # Wrap around (volta ao final)
+            cursor = self.editor.textCursor()
+            cursor.movePosition(cursor.End)
+            self.editor.setTextCursor(cursor)
+            self.editor.find(query, flags)
+
+    def replace(self):
+        query = self.txt_find.text()
+        if not query:
+            return
+        cursor = self.editor.textCursor()
+        if cursor.selectedText() == query or (not self.chk_case.isChecked() and cursor.selectedText().lower() == query.lower()):
+            cursor.insertText(self.txt_replace.text())
+        self.find_next()
+
+    def replace_all(self):
+        query = self.txt_find.text()
+        if not query:
+            return
+        
+        cursor = self.editor.textCursor()
+        cursor.movePosition(cursor.Start)
+        self.editor.setTextCursor(cursor)
+        
+        flags = self.get_find_flags()
+        replace_text = self.txt_replace.text()
+        
+        self.editor.blockSignals(True)
+        while self.editor.find(query, flags):
+            self.editor.textCursor().insertText(replace_text)
+        self.editor.blockSignals(False)
+        self.editor.textChanged.emit()
+
+    def hide_bar(self):
+        self.hide()
+        self.editor.setFocus()
+
 
 class EditorContainerWidget(QWidget):
-    """Container que envolve o CodeEditor com uma barra de alertas de sintaxe (Linter) na parte inferior."""
+    """Container que envolve o CodeEditor com barra de busca (Ctrl+F) e linter (Sintaxe)."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -361,6 +497,12 @@ class EditorContainerWidget(QWidget):
         layout.setSpacing(0)
         
         self.editor = CodeEditor(self)
+        
+        # Barra de Busca (Ctrl+F)
+        self.find_bar = FindReplaceBar(self.editor, self)
+        self.find_bar.hide()
+        layout.addWidget(self.find_bar)
+        
         layout.addWidget(self.editor)
         
         # Barra inferior do linter
@@ -378,6 +520,15 @@ class EditorContainerWidget(QWidget):
         self.linter_timer.timeout.connect(self.run_linter)
         
         self.editor.textChanged.connect(self.on_text_changed)
+        
+        # Atalho para exibir a barra de busca
+        self.find_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.find_shortcut.activated.connect(self.show_find_bar)
+        
+    def show_find_bar(self):
+        self.find_bar.show()
+        self.find_bar.txt_find.setFocus()
+        self.find_bar.txt_find.selectAll()
         
     def on_text_changed(self):
         self.linter_timer.start()
@@ -406,7 +557,6 @@ class EditorContainerWidget(QWidget):
         
         # 1. Validação de chaves/parênteses
         for i, line in enumerate(lines):
-            # Simplificação: ignora comentários na linha
             clean_line = line.split('//')[0].split('/*')[0]
             for char in clean_line:
                 if char in '{[(':
@@ -441,7 +591,6 @@ class EditorContainerWidget(QWidget):
                 
             if not stripped.endswith(';'):
                 if ';' not in stripped:
-                    # Verifica se a próxima linha abre uma chave (o que indicaria cabeçalho de sub-dicionário)
                     is_subdict = False
                     if i + 1 < len(lines):
                         next_line = lines[i+1].strip()
