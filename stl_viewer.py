@@ -227,7 +227,6 @@ class CaseGeometryWidget(QWidget):
         main_layout.addWidget(self.sidebar_right)
         
         self.current_case_path = None
-        self.path_mapping = {} # Mapeia QListWidgetItem -> full_path
         self.scan_case(None)
 
     def scan_case(self, case_path):
@@ -236,7 +235,6 @@ class CaseGeometryWidget(QWidget):
         
         # Limpa estados
         self.mesh_list.clear()
-        self.path_mapping = {}
         
         # Reseta labels
         self.lbl_points.setText("-")
@@ -279,8 +277,8 @@ class CaseGeometryWidget(QWidget):
                 item = QListWidgetItem(rel)
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
                 item.setCheckState(Qt.Checked)
+                item.setData(Qt.UserRole, full) # Salva o caminho no próprio item
                 self.mesh_list.addItem(item)
-                self.path_mapping[item] = full
             self.mesh_list.blockSignals(False)
             
             self.group_cam.setEnabled(True)
@@ -297,14 +295,14 @@ class CaseGeometryWidget(QWidget):
 
     def on_mesh_item_changed(self, item):
         """Oculta/exibe malha com base no checkbox."""
-        full_path = self.path_mapping.get(item)
+        full_path = item.data(Qt.UserRole) if item else None
         if full_path:
             is_checked = (item.checkState() == Qt.Checked)
             self.viewer.set_mesh_visibility(full_path, is_checked)
 
     def on_mesh_selection_changed(self, current, previous):
         """Atualiza a barra lateral direita com as propriedades da malha selecionada."""
-        full_path = self.path_mapping.get(current)
+        full_path = current.data(Qt.UserRole) if current else None
         if not full_path:
             self.group_style.setEnabled(False)
             self.group_info.setEnabled(False)
@@ -353,7 +351,7 @@ class CaseGeometryWidget(QWidget):
     def change_representation(self):
         """Altera o estilo de renderização da malha selecionada."""
         current_item = self.mesh_list.currentItem()
-        full_path = self.path_mapping.get(current_item)
+        full_path = current_item.data(Qt.UserRole) if current_item else None
         actor = self.viewer.actors.get(full_path) if full_path else None
         
         if actor:
@@ -376,7 +374,7 @@ class CaseGeometryWidget(QWidget):
     def change_opacity(self, val):
         """Altera a transparência da malha selecionada."""
         current_item = self.mesh_list.currentItem()
-        full_path = self.path_mapping.get(current_item)
+        full_path = current_item.data(Qt.UserRole) if current_item else None
         actor = self.viewer.actors.get(full_path) if full_path else None
         
         if actor:
