@@ -1,31 +1,47 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QComboBox, QPushButton
-from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton, QLabel, QToolTip
+from PySide6.QtCore import Qt, QPointF
+from PySide6.QtGui import QPainter, QPen, QColor
 
 try:
-    from matplotlib.figure import Figure
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    MATPLOTLIB_AVAILABLE = True
-except Exception:
-    MATPLOTLIB_AVAILABLE = False
+    from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis, QLogValueAxis
+    QTCHARTS_AVAILABLE = True
+except ImportError:
+    QTCHARTS_AVAILABLE = False
 
+class InteractiveChartView(QChartView):
+    """Visualizador do gráfico customizado para suportar zoom por scroll e reset no clique direito."""
+    
+    def __init__(self, chart, parent=None):
+        super().__init__(chart, parent)
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setRubberBand(QChartView.RectangleRubberBand)
+        
+    def wheelEvent(self, event):
+        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
+        self.chart().zoom(factor)
+        event.accept()
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self.chart().zoomReset()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
 class ResidualsWidget(QWidget):
-    """Painel para exibir resíduos do solver em tempo real.
-
-    Permite plotar em função de iterações ou do tempo da simulação com alta performance.
-    """
+    """Painel interativo e moderno para exibir resíduos usando PySide6.QtCharts."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        if not MATPLOTLIB_AVAILABLE:
-            self.placeholder = QLabel("Matplotlib não disponível — instale o matplotlib para ver os gráficos de resíduos.")
+        if not QTCHARTS_AVAILABLE:
+            self.placeholder = QLabel("Módulo PySide6.QtCharts não disponível no ambiente.")
             layout.addWidget(self.placeholder)
-            self._data = {}
             return
 
+        # Painel de controles superiores
         controls = QHBoxLayout()
         self.scale_selector = QComboBox()
         self.scale_selector.addItem("Escala: Linear", "linear")
@@ -46,41 +62,52 @@ class ResidualsWidget(QWidget):
         controls.addWidget(self.clear_btn)
         layout.addLayout(controls)
 
-        self.figure = Figure(figsize=(4, 3))
-        self.canvas = FigureCanvas(self.figure)
-        self.figure.patch.set_facecolor("#f4f4f4")
-        layout.addWidget(self.canvas)
+        # Configuração do Gráfico QtCharts
+        self.chart = QChart()
+        self.chart.setAnimationOptions(QChart.NoAnimation) # Desativa animações para performance em tempo real
+        self.chart.setBackgroundRoundness(0)
+        self.chart.layout().setContentsMargins(4, 4, 4, 4)
+        
+        # Design moderno (paleta de cinzas e legibilidade premium)
+        self.chart.setBackgroundBrush(QColor("#f4f4f4"))
+        self.chart.setTitleBrush(QColor("#161616"))
+        self.chart.legend().setVisible(True)
+        self.chart.legend().setAlignment(Qt.AlignBottom)
+        self.chart.legend().setBackgroundVisible(True)
+        self.chart.legend().setBrush(QColor("#f4f4f4"))
+        self.chart.legend().setPen(QColor("#c6c6c6"))
+        
+        self.chart_view = InteractiveChartView(self.chart, self)
+        layout.addWidget(self.chart_view)
 
-        self.ax = self.figure.add_subplot(111)
-        self.lines = {}
         self.history = {}
         self.time_history = {}
-        self.series_visible = {}
+        self.series_dict = {}
         self.max_points = 200
+        
+        # Paleta de cores moderna para curvas
         self._colors = [
-            "#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd",
-            "#17becf", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22"
+            "#0f62fe", "#da1e28", "#198038", "#b37600", "#8a3ffc",
+            "#007d79", "#ff7eb6", "#6f3e00", "#393939", "#8c9197"
         ]
-        self._legend_pick_map = {}
-        self.canvas.mpl_connect('pick_event', self._on_pick)
 
+        self.axis_x = None
+        self.axis_y = None
         self._setup_axes()
 
     def _on_settings_changed(self):
-        """Recria o gráfico a partir do zero quando as configurações de eixos/escala mudam."""
+        """Reconfigura eixos e atualiza as curvas quando a escala ou tipo de eixo X são alterados."""
         self._setup_axes()
         self._refresh()
 
     def update_residuals(self, res_dict: dict, sim_time=None):
-        """Adiciona novos resíduos e atualiza o gráfico de forma incremental e otimizada."""
-        if not MATPLOTLIB_AVAILABLE:
+        """Recebe novos resíduos e insere no gráfico dinamicamente."""
+        if not QTCHARTS_AVAILABLE:
             return
         for name, val in res_dict.items():
             if name not in self.history:
                 self.history[name] = []
                 self.time_history[name] = []
-            if name not in self.series_visible:
-                self.series_visible[name] = True
             
             self.history[name].append(float(val))
             
@@ -97,115 +124,166 @@ class ResidualsWidget(QWidget):
                 self.history[name] = self.history[name][-self.max_points:]
                 self.time_history[name] = self.time_history[name][-self.max_points:]
         
-        # Dispara redesenho apenas ao receber novos dados
         self._refresh()
 
     def clear_history(self):
-        if not MATPLOTLIB_AVAILABLE:
+        if not QTCHARTS_AVAILABLE:
             return
         self.history = {}
         self.time_history = {}
-        self.lines = {}
-        self.series_visible = {}
-        self._legend_pick_map = {}
+        self.chart.removeAllSeries()
+        self.series_dict = {}
         self._setup_axes()
-        self.canvas.draw()
 
     def _setup_axes(self):
-        if not MATPLOTLIB_AVAILABLE:
+        if not QTCHARTS_AVAILABLE:
             return
+        
+        # Remove eixos antigos
+        if self.axis_x:
+            self.chart.removeAxis(self.axis_x)
+        if self.axis_y:
+            self.chart.removeAxis(self.axis_y)
+            
         mode = self.scale_selector.currentData()
         x_mode = self.xaxis_selector.currentData()
         
-        self.ax.clear()
-        self.lines = {} # Limpa cache de linhas antigas do Matplotlib
-        self._legend_pick_map = {}
-        
-        self.figure.patch.set_facecolor("#f4f4f4")
-        self.ax.set_facecolor("#ffffff")
-        
+        # Eixo X
+        self.axis_x = QValueAxis()
         x_label = 'Tempo de Simulação (s)' if x_mode == "time" else 'Iterações'
-        self.ax.set_xlabel(x_label)
-        self.ax.set_ylabel('Residual')
-        self.ax.tick_params(colors="#525252")
-        self.ax.xaxis.label.set_color("#161616")
-        self.ax.yaxis.label.set_color("#161616")
-        for spine in self.ax.spines.values():
-            spine.set_color("#c6c6c6")
-        self.ax.grid(True, which='major', linestyle='-', linewidth=0.6, alpha=0.6, color="#dde1e6")
-        self.ax.grid(True, which='minor', linestyle=':', linewidth=0.4, alpha=0.45, color="#e5e5e5")
+        self.axis_x.setTitleText(x_label)
+        self.axis_x.setLabelsColor(QColor("#525252"))
+        self.axis_x.setGridLinePen(QPen(QColor("#dde1e6"), 0.6))
+        self.chart.addAxis(self.axis_x, Qt.AlignBottom)
         
+        # Eixo Y (Linear ou Logarítmico)
         if mode == "loglog":
-            self.ax.set_xscale('log' if x_mode == "time" else 'linear')
-            self.ax.set_yscale('log')
+            self.axis_y = QLogValueAxis()
+            self.axis_y.setBase(10.0)
+            self.axis_y.setLabelFormat("%.0e")
         else:
-            self.ax.set_xscale('linear')
-            self.ax.set_yscale('linear')
+            self.axis_y = QValueAxis()
+            self.axis_y.setLabelFormat("%.4f")
+            
+        self.axis_y.setTitleText('Residual')
+        self.axis_y.setLabelsColor(QColor("#525252"))
+        self.axis_y.setGridLinePen(QPen(QColor("#dde1e6"), 0.6))
+        self.chart.addAxis(self.axis_y, Qt.AlignLeft)
+        
+        # Reassocia eixos às curvas ativas
+        for series in self.series_dict.values():
+            series.attachAxis(self.axis_x)
+            series.attachAxis(self.axis_y)
 
     def _refresh(self):
-        if not MATPLOTLIB_AVAILABLE:
+        if not QTCHARTS_AVAILABLE:
             return
+            
         mode = self.scale_selector.currentData()
         x_mode = self.xaxis_selector.currentData()
-        plotted = 0
-        plotted_names = []
         
-        for idx, (name, hist) in enumerate(self.history.items()):
+        min_x, max_x = float('inf'), float('-inf')
+        min_y, max_y = float('inf'), float('-inf')
+        plotted = 0
+        
+        for name, hist in self.history.items():
             if len(hist) < 2:
                 continue
-            
-            if x_mode == "time" and name in self.time_history and len(self.time_history[name]) == len(hist):
-                x = self.time_history[name]
-            else:
-                if mode == "loglog":
-                    x = list(range(1, len(hist) + 1))
-                else:
-                    x = list(range(len(hist)))
-            
-            # Otimização crucial: altera dados in-place se a linha já existir
-            if name in self.lines:
-                line = self.lines[name]
-                line.set_data(x, hist)
-                line.set_visible(self.series_visible.get(name, True))
-            else:
-                color = self._colors[len(self.lines) % len(self._colors)]
-                line, = self.ax.plot(x, hist, label=name, linewidth=1.8, color=color)
-                line.set_visible(self.series_visible.get(name, True))
-                self.lines[name] = line
                 
-            plotted_names.append(name)
+            if x_mode == "time" and name in self.time_history and len(self.time_history[name]) == len(hist):
+                x_vals = self.time_history[name]
+            else:
+                x_vals = list(range(len(hist)))
+                
+            # Cria a série gráfica caso seja uma nova variável
+            if name not in self.series_dict:
+                series = QLineSeries()
+                series.setName(name)
+                
+                pen = QPen()
+                pen.setWidthF(1.8)
+                color_hex = self._colors[len(self.series_dict) % len(self._colors)]
+                pen.setColor(QColor(color_hex))
+                series.setPen(pen)
+                
+                # Exibição de Tooltip interativo ao passar o mouse
+                series.hovered.connect(lambda point, state, s_name=name: self._on_point_hovered(point, state, s_name))
+                
+                self.chart.addSeries(series)
+                series.attachAxis(self.axis_x)
+                series.attachAxis(self.axis_y)
+                self.series_dict[name] = series
+                self._update_legend_connections()
+                
+            series = self.series_dict[name]
+            points = []
+            
+            for x, y in zip(x_vals, hist):
+                if mode == "loglog" and y <= 0:
+                    y = 1e-12 # Valor mínimo seguro para escala log
+                points.append(QPointF(x, y))
+                
+                if x < min_x: min_x = x
+                if x > max_x: max_x = x
+                if y < min_y: min_y = y
+                if y > max_y: max_y = y
+                
+            series.replace(points)
             plotted += 1
             
+        # Atualiza os limites de exibição dinamicamente
         if plotted:
-            self.ax.relim()
-            self.ax.autoscale_view()
-            
-            legend = self.ax.legend(loc='best', frameon=True, framealpha=0.85, fontsize=8)
-            legend.get_frame().set_facecolor("#f4f4f4")
-            legend.get_frame().set_edgecolor("#c6c6c6")
-            legend_lines = legend.get_lines()
-            legend_texts = legend.get_texts()
-            self._legend_pick_map = {}
-            for i, name in enumerate(plotted_names):
-                visible = self.series_visible.get(name, True)
-                if i < len(legend_lines):
-                    leg_line = legend_lines[i]
-                    leg_line.set_picker(8)
-                    leg_line.set_alpha(1.0 if visible else 0.25)
-                    self._legend_pick_map[leg_line] = name
-                if i < len(legend_texts):
-                    leg_text = legend_texts[i]
-                    leg_text.set_picker(True)
-                    leg_text.set_alpha(1.0 if visible else 0.45)
-                    leg_text.set_color("#161616")
-                    self._legend_pick_map[leg_text] = name
-                    
-        self.canvas.draw()
+            if min_x != float('inf') and max_x != float('-inf'):
+                dx = max(1e-5, (max_x - min_x) * 0.02)
+                self.axis_x.setRange(min_x, max_x + dx)
+                
+            if min_y != float('inf') and max_y != float('-inf'):
+                if mode == "loglog":
+                    log_min = max(1e-12, min_y)
+                    self.axis_y.setRange(log_min * 0.5, max_y * 2.0)
+                else:
+                    dy = max(1e-5, (max_y - min_y) * 0.05)
+                    self.axis_y.setRange(min_y - dy, max_y + dy)
 
-    def _on_pick(self, event):
-        artist = getattr(event, 'artist', None)
-        if artist not in self._legend_pick_map:
+    def _update_legend_connections(self):
+        """Conecta cliques na legenda para ocultar/mostrar curvas."""
+        for marker in self.chart.legend().markers():
+            try:
+                marker.clicked.disconnect()
+            except Exception:
+                pass
+            marker.clicked.connect(self._on_marker_clicked)
+
+    def _on_marker_clicked(self):
+        marker = self.sender()
+        if not marker:
             return
-        name = self._legend_pick_map[artist]
-        self.series_visible[name] = not self.series_visible.get(name, True)
-        self._refresh()
+        series = marker.series()
+        if not series:
+            return
+            
+        # Inverte visibilidade da curva
+        visible = not series.isVisible()
+        series.setVisible(visible)
+        marker.setVisible(True)
+        
+        # Opacidade do marcador reflete a visibilidade
+        alpha = 1.0 if visible else 0.35
+        brush = marker.labelBrush()
+        color = brush.color()
+        color.setAlphaF(alpha)
+        brush.setColor(color)
+        marker.setLabelBrush(brush)
+
+    def _on_point_hovered(self, point, state, series_name):
+        """Mostra tooltip moderno com coordenadas do ponto sob o mouse."""
+        if state:
+            x_mode = self.xaxis_selector.currentData()
+            x_unit = "s" if x_mode == "time" else "it"
+            QToolTip.showText(
+                self.cursor().pos(),
+                f"{series_name}\nX: {point.x():.4f} {x_unit}\nY: {point.y():.2e}",
+                self
+            )
+        else:
+            QToolTip.hideText()
