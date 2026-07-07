@@ -154,7 +154,9 @@ class MainWindow(QMainWindow):
 
             # Botão de dropdown para Utilitários extras
             self.util_btn = QToolButton(self)
-            self.util_btn.setText("Utilitários ⚡")
+            self.util_btn.setText("Utilitários")
+            self.util_btn.setIcon(self._load_svg_icon('gear.svg', 'system-run'))
+            self.util_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self.util_btn.setPopupMode(QToolButton.InstantPopup)
             self.util_btn.setStyleSheet(
                 "QToolButton { padding: 4px 8px; border: 1px solid #ced4da; border-radius: 4px; background-color: #ffffff; color: #212529; font-weight: bold; }"
