@@ -156,7 +156,7 @@ class MainWindow(QMainWindow):
         self.file_browser.set_click_callback(self.on_file_clicked)
 
         self.current_file = None
-        self.current_sim_time = None
+        self.current_sim_time = 0.0
         self.follow_solver_log = False
         self.log_follow_path = None
         self.log_follow_pos = 0
@@ -808,6 +808,7 @@ class MainWindow(QMainWindow):
         self.log_follow_pos = 0
         self.log_follow_ino = None
         self.log_follow_shown_path = None
+        self.current_sim_time = 0.0
         self.sim_log_view.clear()
         self._run_command_in_case('/bin/bash', ['-lc', f'./Allrun'], follow_solver_log=True)
 

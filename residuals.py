@@ -84,7 +84,13 @@ class ResidualsWidget(QWidget):
             
             self.history[name].append(float(val))
             
-            t_val = sim_time if sim_time is not None else len(self.history[name])
+            # Garante escala monotônica no eixo do tempo
+            if sim_time is not None:
+                t_val = sim_time
+            elif self.time_history[name]:
+                t_val = self.time_history[name][-1]
+            else:
+                t_val = 0.0
             self.time_history[name].append(float(t_val))
             
             if len(self.history[name]) > self.max_points:
@@ -103,7 +109,7 @@ class ResidualsWidget(QWidget):
         self.series_visible = {}
         self._legend_pick_map = {}
         self._setup_axes()
-        self.canvas.draw_idle()
+        self.canvas.draw()
 
     def _setup_axes(self):
         if not MATPLOTLIB_AVAILABLE:
@@ -194,7 +200,7 @@ class ResidualsWidget(QWidget):
                     leg_text.set_color("#161616")
                     self._legend_pick_map[leg_text] = name
                     
-        self.canvas.draw_idle()
+        self.canvas.draw()
 
     def _on_pick(self, event):
         artist = getattr(event, 'artist', None)
@@ -202,5 +208,4 @@ class ResidualsWidget(QWidget):
             return
         name = self._legend_pick_map[artist]
         self.series_visible[name] = not self.series_visible.get(name, True)
-        self._refresh()
         self._refresh()
