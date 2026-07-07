@@ -53,11 +53,19 @@ class ResidualsWidget(QWidget):
         self.xaxis_selector.addItem("Eixo X: Iterações", "iterations")
         self.xaxis_selector.currentIndexChanged.connect(self._on_settings_changed)
 
+        self.filter_selector = QComboBox()
+        self.filter_selector.addItem("Filtro: Todos", "all")
+        self.filter_selector.addItem("Filtro: Velocidades", "velocities")
+        self.filter_selector.addItem("Filtro: Pressão", "pressure")
+        self.filter_selector.addItem("Filtro: Turbulência", "turbulence")
+        self.filter_selector.currentIndexChanged.connect(self._on_settings_changed)
+
         self.clear_btn = QPushButton("Limpar")
         self.clear_btn.clicked.connect(self.clear_history)
 
         controls.addWidget(self.scale_selector)
         controls.addWidget(self.xaxis_selector)
+        controls.addWidget(self.filter_selector)
         controls.addStretch(1)
         controls.addWidget(self.clear_btn)
         layout.addLayout(controls)
@@ -185,6 +193,7 @@ class ResidualsWidget(QWidget):
             
         mode = self.scale_selector.currentData()
         x_mode = self.xaxis_selector.currentData()
+        filter_mode = self.filter_selector.currentData()
         
         min_x, max_x = float('inf'), float('-inf')
         min_y, max_y = float('inf'), float('-inf')
@@ -243,6 +252,18 @@ class ResidualsWidget(QWidget):
                 if y > max_y: max_y = y
                 
             series.replace(points)
+            
+            # Aplica filtro de equação e checklist de visibilidade
+            is_visible = self.series_visible.get(name, True)
+            if is_visible:
+                if filter_mode == "velocities" and not any(k in name.lower() for k in ("u", "ux", "uy", "uz", "|u|")):
+                    is_visible = False
+                elif filter_mode == "pressure" and not any(k == name.lower() for k in ("p", "p_rgh")):
+                    is_visible = False
+                elif filter_mode == "turbulence" and not any(k in name.lower() for k in ("k", "epsilon", "omega", "nut", "nutilda", "t")):
+                    is_visible = False
+            series.setVisible(is_visible)
+            
             plotted += 1
             
         # Atualiza os limites de exibição dinamicamente

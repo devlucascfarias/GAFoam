@@ -7,13 +7,15 @@ import time
 from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QTextEdit, QPlainTextEdit, QVBoxLayout, QWidget, QMenuBar, QMenu, QSplitter, QTabWidget, QFileDialog, QMessageBox, QToolBar, QLabel, QProgressBar
 from PySide6.QtGui import QAction, QIcon, QFont, QKeySequence, QPalette, QColor, QTextCharFormat, QPainter, QTextCursor
 from PySide6.QtCore import QProcess, Qt, QSize, QRegularExpression, QRect, QTimer
-from editor import CodeEditor, SimpleHighlighter
+from editor import CodeEditor, SimpleHighlighter, EditorContainerWidget
 from filebrowser import FileBrowser
 from stl_viewer import STLViewer, CaseGeometryWidget
 from residuals import ResidualsWidget
 from menus import setup_menus
 from handlers import make_stdout_handler, make_stderr_handler, make_finished_handler
 from terminal import TerminalWidget
+from bc_manager import BCManagerWidget
+from results_tab import ResultsWidget
 
 
 class MainWindow(QMainWindow):
@@ -28,6 +30,12 @@ class MainWindow(QMainWindow):
 
         self.geom_view = CaseGeometryWidget(parent=self)
         self.editor_tabs.addTab(self.geom_view, "Geometria")
+
+        self.bc_view = BCManagerWidget(parent=self)
+        self.editor_tabs.addTab(self.bc_view, "Condições Limite")
+
+        self.results_view = ResultsWidget(parent=self)
+        self.editor_tabs.addTab(self.results_view, "Resultados")
 
         self.path_to_editor = {}
         self.editor_to_path = {}
@@ -232,6 +240,8 @@ class MainWindow(QMainWindow):
         self.file_browser.set_root(dir_path)
         self.current_case = dir_path
         self.geom_view.scan_case(dir_path)
+        self.bc_view.scan_zero_dir()
+        self.results_view.scan_postprocessing()
 
         QMessageBox.information(self, "Sucesso", f"Caso OpenFOAM aberto com sucesso!\n{dir_path}")
     def on_file_clicked(self, index):
@@ -265,17 +275,21 @@ class MainWindow(QMainWindow):
         return
     def current_editor(self):
         w = self.editor_tabs.currentWidget()
-        return w if isinstance(w, CodeEditor) else None
+        if w and hasattr(w, 'editor'):
+            return w.editor
+        return None
 
     def open_file_in_tab(self, file_path, text):
         import os
         if file_path in self.path_to_editor:
             editor = self.path_to_editor[file_path]
-            idx = self.editor_tabs.indexOf(editor)
+            container = editor.parentWidget()
+            idx = self.editor_tabs.indexOf(container)
             if idx != -1:
                 self.editor_tabs.setCurrentIndex(idx)
                 return
-        editor = CodeEditor()
+        container = EditorContainerWidget()
+        editor = container.editor
         editor.setPlainText(text)
         editor.setLineWrapMode(QPlainTextEdit.NoWrap)
         editor.textChanged.connect(self.on_editor_text_changed)
@@ -290,7 +304,7 @@ class MainWindow(QMainWindow):
         editor.setFont(f)
 
         tab_label = os.path.basename(file_path)
-        idx = self.editor_tabs.addTab(editor, tab_label)
+        idx = self.editor_tabs.addTab(container, tab_label)
         self.editor_tabs.setCurrentIndex(idx)
         self.editor_tabs.setTabToolTip(idx, file_path)
 
@@ -322,15 +336,16 @@ class MainWindow(QMainWindow):
         widget = self.editor_tabs.widget(index)
         if widget is None:
             return
-        if widget == self.geom_view:
+        if widget in (self.geom_view, self.bc_view, self.results_view):
             self.editor_tabs.removeTab(index)
-            # Não destrói a geom_view para que possa ser reaberta pelo botão de atalho
+            # Não destrói essas abas permanentes para que possam ser restauradas
             return
-        path = self.editor_to_path.get(widget)
+        editor = widget.editor if hasattr(widget, 'editor') else widget
+        path = self.editor_to_path.get(editor)
         if path:
             del self.path_to_editor[path]
-        if widget in self.editor_to_path:
-            del self.editor_to_path[widget]
+        if editor in self.editor_to_path:
+            del self.editor_to_path[editor]
         self.editor_tabs.removeTab(index)
         widget.deleteLater()
     def save_file(self):

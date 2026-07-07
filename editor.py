@@ -346,3 +346,109 @@ class SimpleHighlighter(QSyntaxHighlighter):
         # Aplicar formato de delimitador C++
         for start, end in cpp_delimiters:
             self.setFormat(start, end - start, self.cppDelimiterFormat)
+
+
+from PySide6.QtWidgets import QVBoxLayout, QLabel
+from PySide6.QtCore import QTimer
+
+class EditorContainerWidget(QWidget):
+    """Container que envolve o CodeEditor com uma barra de alertas de sintaxe (Linter) na parte inferior."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.editor = CodeEditor(self)
+        layout.addWidget(self.editor)
+        
+        # Barra inferior do linter
+        self.linter_lbl = QLabel("✓ Sintaxe: OK", self)
+        self.linter_lbl.setStyleSheet(
+            "background-color: #e6f4ea; color: #137333; "
+            "font-size: 9pt; padding: 4px 8px; border-top: 1px solid #ced4da;"
+        )
+        layout.addWidget(self.linter_lbl)
+        
+        # Debounce timer para evitar validações a cada tecla (800ms de delay)
+        self.linter_timer = QTimer(self)
+        self.linter_timer.setSingleShot(True)
+        self.linter_timer.setInterval(800)
+        self.linter_timer.timeout.connect(self.run_linter)
+        
+        self.editor.textChanged.connect(self.on_text_changed)
+        
+    def on_text_changed(self):
+        self.linter_timer.start()
+        
+    def run_linter(self):
+        text = self.editor.toPlainText()
+        errors = self.check_syntax(text)
+        
+        if errors:
+            self.linter_lbl.setText(f"⚠️ {errors[0]}")
+            self.linter_lbl.setStyleSheet(
+                "background-color: #fce8e6; color: #c5221f; "
+                "font-size: 9pt; padding: 4px 8px; border-top: 1px solid #ced4da;"
+            )
+        else:
+            self.linter_lbl.setText("✓ Sintaxe: OK")
+            self.linter_lbl.setStyleSheet(
+                "background-color: #e6f4ea; color: #137333; "
+                "font-size: 9pt; padding: 4px 8px; border-top: 1px solid #ced4da;"
+            )
+            
+    def check_syntax(self, text):
+        errors = []
+        stack = []
+        lines = text.split('\n')
+        
+        # 1. Validação de chaves/parênteses
+        for i, line in enumerate(lines):
+            # Simplificação: ignora comentários na linha
+            clean_line = line.split('//')[0].split('/*')[0]
+            for char in clean_line:
+                if char in '{[(':
+                    stack.append((char, i + 1))
+                elif char in '}])':
+                    if not stack:
+                        errors.append(f"Caractere '{char}' de fechamento inesperado na linha {i + 1}")
+                        return errors
+                    top, line_num = stack.pop()
+                    if (char == '}' and top != '{') or (char == ']' and top != '[') or (char == ')' and top != '('):
+                        errors.append(f"Chave/parêntese incorreto na linha {i + 1} (esperava '{top}' aberto na linha {line_num})")
+                        return errors
+                        
+        while stack:
+            top, line_num = stack.pop()
+            errors.append(f"Chave/parêntese '{top}' aberto na linha {line_num} nunca foi fechado")
+            return errors
+            
+        # 2. Validação de Ponto e Vírgula ausente em atribuições
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(("//", "/*", "*", "#", "!", "info")):
+                continue
+            if stripped.endswith(("{", "}", "(", ")", ";", "/*", "*/", "FoamFile")):
+                continue
+            
+            parts = stripped.split()
+            if len(parts) <= 1:
+                continue
+                
+            if not stripped.endswith(';'):
+                if ';' not in stripped:
+                    # Verifica se a próxima linha abre uma chave (o que indicaria cabeçalho de sub-dicionário)
+                    is_subdict = False
+                    if i + 1 < len(lines):
+                        next_line = lines[i+1].strip()
+                        if next_line.startswith('{'):
+                            is_subdict = True
+                    if not is_subdict:
+                        errors.append(f"Possível ponto e vírgula ';' ausente na linha {i + 1}")
+                        return errors
+                        
+        return errors
