@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
                              QListWidget, QListWidgetItem, QSlider, QGroupBox, 
                              QFormLayout, QFileDialog)
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter, QPen, QColor
+from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QIcon
 
 class STLViewer(QWidget):
     def __init__(self, parent=None):
@@ -273,8 +273,11 @@ class CaseGeometryWidget(QWidget):
             
             # Popula QListWidget com itens marcáveis
             self.mesh_list.blockSignals(True)
+            mesh_icon = self.create_mesh_icon()
             for rel, full in found_files:
-                item = QListWidgetItem(rel)
+                name_only = os.path.basename(full)
+                item = QListWidgetItem(name_only)
+                item.setIcon(mesh_icon)
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
                 item.setCheckState(Qt.Checked)
                 item.setData(Qt.UserRole, full) # Salva o caminho no próprio item
@@ -415,3 +418,32 @@ class CaseGeometryWidget(QWidget):
                     self.main_window.log(f"Captura de tela salva com sucesso em: {file_path}\n")
             except Exception as e:
                 print(f"Erro ao salvar screenshot: {e}")
+
+    def create_mesh_icon(self):
+        """Desenha programaticamente um ícone vetorial de malha STL/OBJ."""
+        from PySide6.QtCore import QPoint
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.transparent)
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        pen = QPen(QColor("#1a73e8"))
+        pen.setWidthF(1.5)
+        painter.setPen(pen)
+        
+        # Desenha um tetraedro tridimensional (ícone de grade/mesh)
+        p1 = QPoint(8, 2)
+        p2 = QPoint(2, 12)
+        p3 = QPoint(14, 12)
+        p4 = QPoint(8, 8)
+        
+        painter.drawLine(p1, p2)
+        painter.drawLine(p2, p3)
+        painter.drawLine(p3, p1)
+        painter.drawLine(p1, p4)
+        painter.drawLine(p2, p4)
+        painter.drawLine(p3, p4)
+        
+        painter.end()
+        return QIcon(pixmap)
