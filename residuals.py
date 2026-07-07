@@ -153,7 +153,9 @@ class ResidualsWidget(QWidget):
         x_label = 'Tempo de Simulação (s)' if x_mode == "time" else 'Iterações'
         self.axis_x.setTitleText(x_label)
         self.axis_x.setLabelsColor(QColor("#525252"))
-        self.axis_x.setGridLinePen(QPen(QColor("#dde1e6"), 0.6))
+        self.axis_x.setGridLinePen(QPen(QColor("#cccccc"), 0.8)) # Grade principal visível
+        self.axis_x.setMinorGridLineVisible(True)                 # Subgrade quadriculada
+        self.axis_x.setMinorGridLinePen(QPen(QColor("#e5e5e5"), 0.5, Qt.DashLine))
         self.chart.addAxis(self.axis_x, Qt.AlignBottom)
         
         # Eixo Y (Linear ou Logarítmico)
@@ -167,7 +169,9 @@ class ResidualsWidget(QWidget):
             
         self.axis_y.setTitleText('Residual')
         self.axis_y.setLabelsColor(QColor("#525252"))
-        self.axis_y.setGridLinePen(QPen(QColor("#dde1e6"), 0.6))
+        self.axis_y.setGridLinePen(QPen(QColor("#cccccc"), 0.8)) # Grade principal visível
+        self.axis_y.setMinorGridLineVisible(True)                 # Subgrade quadriculada
+        self.axis_y.setMinorGridLinePen(QPen(QColor("#e5e5e5"), 0.5, Qt.DashLine))
         self.chart.addAxis(self.axis_y, Qt.AlignLeft)
         
         # Reassocia eixos às curvas ativas
@@ -218,11 +222,21 @@ class ResidualsWidget(QWidget):
             series = self.series_dict[name]
             points = []
             
+            # Ignora as 3 primeiras iterações para evitar que o pico transiente inicial
+            # distorça os limites do eixo Y, permitindo um "zoom" nas curvas de convergência estabilizada.
+            ignore_count = 3 if len(hist) > 6 else (1 if len(hist) > 3 else 0)
+            calc_x = x_vals[ignore_count:]
+            calc_hist = hist[ignore_count:]
+
             for x, y in zip(x_vals, hist):
                 if mode == "loglog" and y <= 0:
                     y = 1e-12 # Valor mínimo seguro para escala log
                 points.append(QPointF(x, y))
                 
+            # Calcula limites com base nos dados filtrados (pós-pico transiente)
+            for x, y in zip(calc_x, calc_hist):
+                if mode == "loglog" and y <= 0:
+                    y = 1e-12
                 if x < min_x: min_x = x
                 if x > max_x: max_x = x
                 if y < min_y: min_y = y
