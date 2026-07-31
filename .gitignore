@@ -1,1 +1,2 @@
-sim_saudavel_189/
+sim_saudavel_189/__pycache__/
+*.pyc

@@ -1,0 +1,56 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     | Website:  https://openfoam.org
+    \\  /    A nd           | Version:  12
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    format      binary;
+    class       volScalarField;
+    location    "0";
+    object      yPlus;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [];
+
+internalField   uniform 0;
+
+boundaryField
+{
+    inletGeo
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+    outletGeo
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+    wallsGeo
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+    mitralABodyGeo
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+    mitralBBodyGeo
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+    mitralRingWallGeo
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+}
+
+
+// ************************************************************************* //
