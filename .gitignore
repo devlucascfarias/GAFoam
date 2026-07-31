@@ -1,2 +1,5 @@
 sim_saudavel_189/__pycache__/
 *.pyc
+.venv/
+caso_teste/
+relatorio_parcial_pibiti.*
