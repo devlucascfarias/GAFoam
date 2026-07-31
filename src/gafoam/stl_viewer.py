@@ -296,6 +296,21 @@ class CaseGeometryWidget(QWidget):
         if self.current_case_path:
             self.scan_case(self.current_case_path)
 
+    def select_mesh(self, file_path):
+        """Seleciona na lista a malha correspondente ao caminho informado.
+
+        Retorna True se a malha estava carregada.
+        """
+        if not file_path:
+            return False
+        target = os.path.abspath(file_path)
+        for row in range(self.mesh_list.count()):
+            item = self.mesh_list.item(row)
+            if os.path.abspath(item.data(Qt.UserRole) or "") == target:
+                self.mesh_list.setCurrentRow(row)
+                return True
+        return False
+
     def on_mesh_item_changed(self, item):
         """Oculta/exibe malha com base no checkbox."""
         full_path = item.data(Qt.UserRole) if item else None

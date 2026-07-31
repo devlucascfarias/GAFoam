@@ -1,6 +1,29 @@
-from PySide6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit
-from PySide6.QtGui import QTextCharFormat, QPainter, QColor, QFont, QSyntaxHighlighter
-from PySide6.QtCore import QSize, QRect, Qt, QRegularExpression
+"""Editor de dicionários: realce sintático, busca/substituição e linter."""
+
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QKeySequence,
+    QPainter,
+    QShortcut,
+    QSyntaxHighlighter,
+    QTextCharFormat,
+    QTextDocument,
+)
+from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt, QTimer
+
+from gafoam import foamlint
 
 
 class CodeEditor(QPlainTextEdit):
@@ -348,10 +371,6 @@ class SimpleHighlighter(QSyntaxHighlighter):
             self.setFormat(start, end - start, self.cppDelimiterFormat)
 
 
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QCheckBox, QPushButton
-from PySide6.QtCore import QTimer
-from PySide6.QtGui import QKeySequence, QShortcut, QTextDocument
-
 class FindReplaceBar(QWidget):
     """Barra de pesquisa e substituição moderna acoplada ao editor."""
     
@@ -534,8 +553,7 @@ class EditorContainerWidget(QWidget):
         self.linter_timer.start()
         
     def run_linter(self):
-        text = self.editor.toPlainText()
-        errors = self.check_syntax(text)
+        errors = self.check_syntax(self.editor.toPlainText())
         
         if errors:
             self.linter_lbl.setText(f"⚠️ {errors[0]}")
@@ -550,54 +568,8 @@ class EditorContainerWidget(QWidget):
                 "font-size: 9pt; padding: 4px 8px; border-top: 1px solid #ced4da;"
             )
             
-    def check_syntax(self, text):
-        errors = []
-        stack = []
-        lines = text.split('\n')
-        
-        # 1. Validação de chaves/parênteses
-        for i, line in enumerate(lines):
-            clean_line = line.split('//')[0].split('/*')[0]
-            for char in clean_line:
-                if char in '{[(':
-                    stack.append((char, i + 1))
-                elif char in '}])':
-                    if not stack:
-                        errors.append(f"Caractere '{char}' de fechamento inesperado na linha {i + 1}")
-                        return errors
-                    top, line_num = stack.pop()
-                    if (char == '}' and top != '{') or (char == ']' and top != '[') or (char == ')' and top != '('):
-                        errors.append(f"Chave/parêntese incorreto na linha {i + 1} (esperava '{top}' aberto na linha {line_num})")
-                        return errors
-                        
-        while stack:
-            top, line_num = stack.pop()
-            errors.append(f"Chave/parêntese '{top}' aberto na linha {line_num} nunca foi fechado")
-            return errors
-            
-        # 2. Validação de Ponto e Vírgula ausente em atribuições
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if stripped.startswith(("//", "/*", "*", "#", "!", "info")):
-                continue
-            if stripped.endswith(("{", "}", "(", ")", ";", "/*", "*/", "FoamFile")):
-                continue
-            
-            parts = stripped.split()
-            if len(parts) <= 1:
-                continue
-                
-            if not stripped.endswith(';'):
-                if ';' not in stripped:
-                    is_subdict = False
-                    if i + 1 < len(lines):
-                        next_line = lines[i+1].strip()
-                        if next_line.startswith('{'):
-                            is_subdict = True
-                    if not is_subdict:
-                        errors.append(f"Possível ponto e vírgula ';' ausente na linha {i + 1}")
-                        return errors
-                        
-        return errors
+
+    @staticmethod
+    def check_syntax(text):
+        """Problemas sintáticos do dicionário aberto (ver `gafoam.foamlint`)."""
+        return foamlint.check_syntax(text)

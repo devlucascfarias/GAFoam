@@ -1,19 +1,41 @@
-import sys
+"""Janela principal da aplicação: layout, execução de comandos e monitoramento."""
+
 import os
 import signal
+import stat
 import subprocess
-import glob
 import time
-from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QTextEdit, QPlainTextEdit, QVBoxLayout, QHBoxLayout, QWidget, QMenuBar, QMenu, QSplitter, QTabWidget, QFileDialog, QMessageBox, QToolBar, QLabel, QProgressBar, QDockWidget, QFormLayout, QDoubleSpinBox, QHeaderView, QTableWidget, QTableWidgetItem, QToolButton
-from PySide6.QtGui import QAction, QIcon, QFont, QKeySequence, QPalette, QColor, QTextCharFormat, QPainter, QTextCursor
-from PySide6.QtCore import QProcess, Qt, QSize, QRegularExpression, QRect, QTimer
-from editor import CodeEditor, SimpleHighlighter, EditorContainerWidget
-from filebrowser import FileBrowser
-from stl_viewer import STLViewer, CaseGeometryWidget
-from residuals import ResidualsWidget
-from menus import setup_menus
-from handlers import make_stdout_handler, make_stderr_handler, make_finished_handler
-from terminal import TerminalWidget
+
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QPlainTextEdit,
+    QTextEdit,
+    QVBoxLayout,
+    QHBoxLayout,
+    QWidget,
+    QMenu,
+    QSplitter,
+    QTabWidget,
+    QFileDialog,
+    QMessageBox,
+    QToolBar,
+    QLabel,
+    QProgressBar,
+    QToolButton,
+)
+from PySide6.QtGui import QAction, QIcon, QFont, QKeySequence, QPalette, QColor, QTextCursor
+from PySide6.QtCore import QProcess, Qt, QSize, QTimer
+
+from gafoam import foamdict, logparse
+from gafoam.editor import EditorContainerWidget, SimpleHighlighter
+from gafoam.filebrowser import FileBrowser
+from gafoam.handlers import make_stdout_handler, make_stderr_handler, make_finished_handler
+from gafoam.menus import setup_menus
+from gafoam.panels import ControlDictDockWidget, ConvergenceMonitorWidget
+from gafoam.residuals import ResidualsWidget
+from gafoam.resources import icon_path
+from gafoam.stl_viewer import CaseGeometryWidget
 
 
 class MainWindow(QMainWindow):
@@ -26,8 +48,10 @@ class MainWindow(QMainWindow):
         self.editor_tabs.setTabsClosable(True)
         self.editor_tabs.tabCloseRequested.connect(self.on_tab_close_requested)
 
+        # A geometria é um painel sob demanda: só vira aba quando o usuário
+        # abre um arquivo de malha, para não ocupar o editor por padrão.
         self.geom_view = CaseGeometryWidget(parent=self)
-        self.editor_tabs.addTab(self.geom_view, "Geometria")
+        self.geom_scanned_case = None
 
         self.path_to_editor = {}
         self.editor_to_path = {}
@@ -275,21 +299,19 @@ class MainWindow(QMainWindow):
                 break
 
     def _load_svg_icon(self, filename, fallback_theme=None):
-        icon_path = os.path.join(os.path.dirname(__file__), 'icons', filename)
-        if os.path.isfile(icon_path):
-            return QIcon(icon_path)
+        """Ícone do pacote, com fallback para o tema do sistema."""
+        path = icon_path(filename)
+        if os.path.isfile(path):
+            return QIcon(path)
         if fallback_theme:
             return QIcon.fromTheme(fallback_theme)
         return QIcon()
 
     def selecionar_caso(self):
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
-        import os
         dir_path = QFileDialog.getExistingDirectory(self, "Selecione a pasta do caso OpenFOAM")
         if not dir_path:
             return
-        required_dirs = ["0", "constant", "system"]
-        missing = [d for d in required_dirs if not os.path.isdir(os.path.join(dir_path, d))]
+        missing = foamdict.validate_case_dirs(dir_path)
         if missing:
             QMessageBox.critical(self, "Erro", f"A pasta selecionada não contém as subpastas obrigatórias: {', '.join(missing)}")
             return
@@ -297,7 +319,10 @@ class MainWindow(QMainWindow):
         self.show_tab("Console")
         self.file_browser.set_root(dir_path)
         self.current_case = dir_path
-        self.geom_view.scan_case(dir_path)
+        self.geom_scanned_case = None
+        if self.editor_tabs.indexOf(self.geom_view) != -1:
+            # Painel já aberto: recarrega para refletir o novo caso.
+            self.show_geometry()
         self.control_dock.load_case(dir_path)
         self.convergence_monitor.load_case(dir_path)
 
@@ -309,9 +334,9 @@ class MainWindow(QMainWindow):
         if self.file_browser.file_model.isDir(index):
             return
         file_path = self.file_browser.file_model.filePath(index)
-        
-        if file_path.lower().endswith(".stl"):
-            self.open_stl_in_tab(file_path)
+
+        if file_path.lower().endswith((".stl", ".obj")):
+            self.show_geometry(file_path)
             return
 
         try:
@@ -338,7 +363,6 @@ class MainWindow(QMainWindow):
         return None
 
     def open_file_in_tab(self, file_path, text):
-        import os
         if file_path in self.path_to_editor:
             editor = self.path_to_editor[file_path]
             container = editor.parentWidget()
@@ -370,25 +394,26 @@ class MainWindow(QMainWindow):
         self.editor_to_path[editor] = file_path
         self.current_file = file_path
 
-    def open_stl_in_tab(self, file_path):
-        import os
-        if file_path in self.path_to_editor:
-            viewer = self.path_to_editor[file_path]
-            idx = self.editor_tabs.indexOf(viewer)
-            if idx != -1:
-                self.editor_tabs.setCurrentIndex(idx)
-                return
+    def show_geometry(self, file_path=None):
+        """Abre o painel de geometria, destacando a malha informada.
 
-        viewer = STLViewer()
-        viewer.load_stl(file_path)
+        A aba é criada na primeira chamada e reaproveitada nas seguintes; o
+        caso só é varrido quando o painel é realmente exibido.
+        """
+        index = self.editor_tabs.indexOf(self.geom_view)
+        if index == -1:
+            index = self.editor_tabs.addTab(self.geom_view, "Geometria")
+            self.editor_tabs.setTabToolTip(index, "Visualização das malhas do caso")
 
-        tab_label = os.path.basename(file_path)
-        idx = self.editor_tabs.addTab(viewer, tab_label)
-        self.editor_tabs.setCurrentIndex(idx)
-        self.editor_tabs.setTabToolTip(idx, file_path)
+        if self.current_case and self.geom_scanned_case != self.current_case:
+            self.geom_view.scan_case(self.current_case)
+            self.geom_scanned_case = self.current_case
 
-        self.path_to_editor[file_path] = viewer
-        self.editor_to_path[viewer] = file_path
+        self.editor_tabs.setCurrentIndex(index)
+
+        if file_path and not self.geom_view.select_mesh(file_path):
+            # Arquivo fora da varredura (caso não aberto ou malha recém-criada).
+            self.geom_view.viewer.load_meshes([(os.path.basename(file_path), file_path)])
 
     def on_tab_close_requested(self, index):
         widget = self.editor_tabs.widget(index)
@@ -432,7 +457,6 @@ class MainWindow(QMainWindow):
         self.editor_to_path[editor] = path
         self.path_to_editor[path] = editor
         idx = self.editor_tabs.currentIndex()
-        import os
         self.editor_tabs.setTabText(idx, os.path.basename(path))
         self.editor_tabs.setTabToolTip(idx, path)
         return self.save_file()
@@ -650,104 +674,17 @@ class MainWindow(QMainWindow):
         self.log("\nProcesso finalizado.\n")
 
     def parse_residuals(self, text):
-        import re
-        import math
-        res_dict = {}
-
-        # Busca o tempo de simulação atual no log
-        for m in re.finditer(r"\bTime\s*[=:]\s*([\d.eE+-]+)", text):
-            try:
-                self.current_sim_time = float(m.group(1))
-            except ValueError:
-                pass
-
-        # Residuos do solver
-        for m in re.finditer(r"Solving for (\w+), Initial residual = ([\d.eE+-]+)", text):
-            var_name = m.group(1)
-            try:
-                res_dict[var_name] = float(m.group(2))
-            except ValueError:
-                pass
-
-        # Mostra modulo da velocidade com os componentes disponiveis (2D ou 3D)
-        u_components = [k for k in ("Ux", "Uy", "Uz") if k in res_dict]
-        if u_components:
-            try:
-                umag = math.sqrt(sum(res_dict[k] ** 2 for k in u_components))
-                for k in ("Ux", "Uy", "Uz"):
-                    res_dict.pop(k, None)
-                res_dict["|U|"] = umag
-            except Exception:
-                pass
-
-        # yPlus stats: min/max/average
-        for m in re.finditer(
-            r"y\+\s*:\s*min\s*=\s*([\d.eE+-]+),\s*max\s*=\s*([\d.eE+-]+),\s*average\s*=\s*([\d.eE+-]+)",
-            text
-        ):
-            try:
-                res_dict["y+ min"] = float(m.group(1))
-                res_dict["y+ max"] = float(m.group(2))
-                res_dict["y+ avg"] = float(m.group(3))
-            except ValueError:
-                pass
-
-        # Courant number
-        for m in re.finditer(r"Courant Number mean:\s*([\d.eE+-]+)\s*max:\s*([\d.eE+-]+)", text):
-            try:
-                res_dict["Co mean"] = float(m.group(1))
-                res_dict["Co max"] = float(m.group(2))
-            except ValueError:
-                pass
-
-        # deltaT
-        for m in re.finditer(r"deltaT\s*=\s*([\d.eE+-]+)", text):
-            try:
-                res_dict["deltaT"] = float(m.group(1))
-            except ValueError:
-                pass
-
-        # Vazao/velocidade media de functionObject custom
-        for m in re.finditer(
-            r"Time:[^|\n]*\|\s*Area:\s*([\d.eE+-]+)\s*\|\s*Q:\s*([\d.eE+-]+)\s*\|\s*U_mean:\s*([\d.eE+-]+)",
-            text
-        ):
-            try:
-                res_dict["Area"] = float(m.group(1))
-                res_dict["Q"] = float(m.group(2))
-                res_dict["U_mean"] = float(m.group(3))
-            except ValueError:
-                pass
-
-        # min/max de U e p vindos de volFieldValue
-        for m in re.finditer(r"minMag\(\)\s+of\s+U\s*=\s*([\d.eE+-]+)", text):
-            try:
-                res_dict["U minMag"] = float(m.group(1))
-            except ValueError:
-                pass
-        for m in re.finditer(r"maxMag\(\)\s+of\s+U\s*=\s*([\d.eE+-]+)", text):
-            try:
-                res_dict["U maxMag"] = float(m.group(1))
-            except ValueError:
-                pass
-        for m in re.finditer(r"min\(\)\s+of\s+p\s*=\s*([\d.eE+-]+)", text):
-            try:
-                res_dict["p min"] = float(m.group(1))
-            except ValueError:
-                pass
-        for m in re.finditer(r"max\(\)\s+of\s+p\s*=\s*([\d.eE+-]+)", text):
-            try:
-                res_dict["p max"] = float(m.group(1))
-            except ValueError:
-                pass
-
-        if res_dict:
-            self.residuals_view.update_residuals(res_dict, getattr(self, 'current_sim_time', None))
-            for name, val in res_dict.items():
-                self.convergence_monitor.update_residual(name, val)
+        """Extrai grandezas do log e as encaminha ao gráfico e ao monitor."""
+        values, sim_time = logparse.parse_residuals(text)
+        if sim_time is not None:
+            self.current_sim_time = sim_time
+        if not values:
+            return
+        self.residuals_view.update_residuals(values, getattr(self, 'current_sim_time', None))
+        for name, val in values.items():
+            self.convergence_monitor.update_residual(name, val)
 
     def _run_command_in_case(self, command, args=None, follow_solver_log=False):
-        from PySide6.QtWidgets import QMessageBox
         if not getattr(self, 'current_case', None):
             QMessageBox.warning(self, "Aviso", "Nenhum caso aberto. Selecione um caso antes de executar este comando.")
             return
@@ -914,9 +851,6 @@ class MainWindow(QMainWindow):
 
         Usa um shell para permitir scripts com redirecionamentos e chamadas internas.
         """
-        from PySide6.QtWidgets import QMessageBox
-        import os, stat
-
         case = getattr(self, 'current_case', None)
         if not case:
             QMessageBox.warning(self, "Aviso", "Nenhum caso aberto. Selecione um caso antes de executar a simulação.")
@@ -969,21 +903,8 @@ class MainWindow(QMainWindow):
             self.log("\nProcesso finalizado.\n")
 
     def _choose_solver_log_file(self):
-        case = getattr(self, 'current_case', None)
-        if not case:
-            return None
-
-        preferred = os.path.join(case, 'log.foam')
-        if os.path.isfile(preferred):
-            return preferred
-
-        candidates = [
-            p for p in glob.glob(os.path.join(case, 'log.*'))
-            if os.path.isfile(p) and not p.endswith('.log')
-        ]
-        if not candidates:
-            return None
-        return max(candidates, key=os.path.getmtime)
+        """Log do solver do caso atual, ou None se não houver."""
+        return logparse.choose_solver_log_file(getattr(self, 'current_case', None))
 
     def _poll_solver_log(self):
         if not self.follow_solver_log:
@@ -1089,265 +1010,3 @@ class MainWindow(QMainWindow):
             except ValueError:
                 pass
         return targets
-
-class ConvergenceMonitorWidget(QWidget):
-    """Monitor de convergência em tempo real acoplado à aba de simulação."""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
-        
-        title = QLabel("Status de Convergência", self)
-        title.setStyleSheet("font-weight: bold; color: #495057; font-size: 10pt;")
-        layout.addWidget(title)
-        
-        self.table = QTableWidget(self)
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Variável", "Atual", "Meta"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setAlternatingRowColors(True)
-        self.table.setStyleSheet(
-            "QTableWidget { gridline-color: #dee2e6; border: 1px solid #ced4da; border-radius: 4px; font-size: 8.5pt; }"
-            "QHeaderView::section { background-color: #f1f3f5; border: 1px solid #dee2e6; font-weight: bold; padding: 2px; }"
-        )
-        layout.addWidget(self.table)
-        self.targets = {}
-
-    def load_case(self, case_path):
-        """Carrega limites de convergência do fvSolution."""
-        self.targets = self.parse_residual_controls(case_path)
-        self.table.setRowCount(0)
-
-    def parse_residual_controls(self, case_path):
-        """Analisa tolerâncias de residualControl no fvSolution."""
-        import re
-        sol_path = os.path.join(case_path, "system", "fvSolution")
-        if not os.path.isfile(sol_path):
-            return {}
-        try:
-            with open(sol_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            match = re.search(r'residualControl\s*\{', content)
-            if not match:
-                return {}
-            start = match.end()
-            brace = 1
-            end = -1
-            for idx in range(start, len(content)):
-                c = content[idx]
-                if c == '{':
-                    brace += 1
-                elif c == '}':
-                    brace -= 1
-                    if brace == 0:
-                        end = idx
-                        break
-            if end == -1:
-                return {}
-            block = content[start:end]
-            targets = {}
-            for m in re.finditer(r'([a-zA-Z0-9_"\(\)\|\s\-]+)\s+([0-9eE\.\-]+)\s*;', block):
-                key = m.group(1).strip().strip('"').strip("'")
-                targets[key] = float(m.group(2))
-            return targets
-        except Exception:
-            return {}
-
-    def update_residual(self, name, val):
-        """Atualiza a tabela com o resíduo mais recente de cada variável."""
-        import re
-        row = -1
-        for r in range(self.table.rowCount()):
-            if self.table.item(r, 0).text() == name:
-                row = r
-                break
-        if row == -1:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(name))
-            
-            # Procura tolerância correspondente
-            target = 1e-5
-            for key, target_val in self.targets.items():
-                try:
-                    if re.search(key, name):
-                        target = target_val
-                        break
-                except Exception:
-                    if key in name:
-                        target = target_val
-                        break
-            self.table.setItem(row, 2, QTableWidgetItem(f"{target:.1e}"))
-            
-        item_val = QTableWidgetItem(f"{val:.2e}")
-        
-        # Compara com a meta
-        try:
-            target = float(self.table.item(row, 2).text())
-        except ValueError:
-            target = 1e-5
-            
-        if val <= target:
-            item_val.setForeground(QColor("#137333")) # Verde
-            item_val.setToolTip("Convergido!")
-        else:
-            item_val.setForeground(QColor("#d9381e")) # Vermelho
-            
-        self.table.setItem(row, 1, item_val)
-
-
-class ControlDictDockWidget(QDockWidget):
-    """Painel lateral dockable para inspecionar e alterar parâmetros do controlDict."""
-    
-    def __init__(self, parent=None):
-        super().__init__("Parâmetros do Caso (controlDict)", parent)
-        self.main_window = parent
-        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        
-        container = QWidget()
-        container.setStyleSheet("background-color: #f8f9fa; border-top: 1px solid #dee2e6;")
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
-        
-        form = QFormLayout()
-        self.txt_app = QLabel("-")
-        self.txt_app.setStyleSheet("font-weight: bold; color: #495057;")
-        form.addRow("Solver:", self.txt_app)
-        
-        self.spin_endtime = QDoubleSpinBox()
-        self.spin_endtime.setRange(0, 1e9)
-        self.spin_endtime.setDecimals(4)
-        form.addRow("Tempo Final:", self.spin_endtime)
-        
-        self.spin_deltat = QDoubleSpinBox()
-        self.spin_deltat.setRange(1e-12, 1e9)
-        self.spin_deltat.setDecimals(8)
-        form.addRow("Passo deltaT:", self.spin_deltat)
-        
-        self.spin_interval = QDoubleSpinBox()
-        self.spin_interval.setRange(0, 1e9)
-        self.spin_interval.setDecimals(4)
-        form.addRow("Gravação:", self.spin_interval)
-        
-        layout.addLayout(form)
-        
-        self.btn_save = QPushButton("Salvar Alterações")
-        self.btn_save.setStyleSheet(
-            "background-color: #1a73e8; color: white; font-weight: bold; padding: 6px 12px; border-radius: 4px;"
-        )
-        self.btn_save.clicked.connect(self.save_parameters)
-        layout.addWidget(self.btn_save)
-        
-        layout.addStretch(1)
-        self.setWidget(container)
-        
-        self.current_case_path = None
-        self.setEnabled(False)
-
-    def load_case(self, case_path):
-        import re
-        self.current_case_path = case_path
-        if not case_path:
-            self.setEnabled(False)
-            return
-            
-        params = self.read_control_dict(case_path)
-        if params:
-            self.setEnabled(True)
-            self.txt_app.setText(params.get("application", "-"))
-            
-            try:
-                self.spin_endtime.setValue(float(params.get("endTime", "0")))
-            except ValueError:
-                self.spin_endtime.setValue(0)
-                
-            try:
-                self.spin_deltat.setValue(float(params.get("deltaT", "0.001")))
-            except ValueError:
-                self.spin_deltat.setValue(0.001)
-                
-            try:
-                self.spin_interval.setValue(float(params.get("writeInterval", "100")))
-            except ValueError:
-                self.spin_interval.setValue(100)
-        else:
-            self.setEnabled(False)
-
-    def read_control_dict(self, case_path):
-        import re
-        dict_path = os.path.join(case_path, "system", "controlDict")
-        if not os.path.isfile(dict_path):
-            return {}
-        try:
-            with open(dict_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            clean = re.sub(r'//.*', '', content)
-            clean = re.sub(r'/\*.*?\*/', '', clean, flags=re.DOTALL)
-            
-            res = {}
-            for key in ("endTime", "deltaT", "writeInterval", "application"):
-                m = re.search(rf'\b{key}\s+([^;]+);', clean)
-                if m:
-                    res[key] = m.group(1).strip()
-            return res
-        except Exception:
-            return {}
-
-    def save_parameters(self):
-        if not self.current_case_path:
-            return
-            
-        values = {
-            "endTime": str(self.spin_endtime.value()),
-            "deltaT": str(self.spin_deltat.value()),
-            "writeInterval": str(self.spin_interval.value())
-        }
-        
-        if self.write_control_dict(self.current_case_path, values):
-            QMessageBox.information(self, "Sucesso", "Parâmetros salvos com sucesso!")
-            if hasattr(self.main_window, 'log'):
-                self.main_window.log("Parâmetros do controlDict atualizados.\n")
-                
-            # Força recarga do arquivo no editor se estiver aberto
-            dict_path = os.path.join(self.current_case_path, "system", "controlDict")
-            if hasattr(self.main_window, 'path_to_editor'):
-                editor = self.main_window.path_to_editor.get(dict_path)
-                if editor:
-                    try:
-                        with open(dict_path, 'r', encoding='utf-8') as f:
-                            editor.blockSignals(True)
-                            editor.setPlainText(f.read())
-                            editor.blockSignals(False)
-                    except Exception:
-                        pass
-        else:
-            QMessageBox.critical(self, "Erro", "Falha ao atualizar controlDict.")
-
-    def write_control_dict(self, case_path, values):
-        import re
-        dict_path = os.path.join(case_path, "system", "controlDict")
-        if not os.path.isfile(dict_path):
-            return False
-        try:
-            with open(dict_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                
-            for key, val in values.items():
-                pattern = rf'(\b{key}\s+)[^;]+(\s*;)'
-                content = re.sub(pattern, rf'\g<1>{val}\g<2>', content)
-                
-            with open(dict_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            return True
-        except Exception:
-            return False
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
