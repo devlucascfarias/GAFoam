@@ -223,3 +223,58 @@ def test_deteccao_de_patches_stl(tmp_path):
     assert patches[1]["name"] == "fuselage"
     assert patches[1]["faces"] == 1
 
+
+def test_recarregamento_arquivo_externo(window, tmp_path):
+    file_path = tmp_path / "system" / "controlDict"
+    file_path.parent.mkdir(parents=True)
+    file_path.write_text("application simpleFoam;", encoding="utf-8")
+
+    window.open_file_in_tab(str(file_path), "application simpleFoam;")
+    editor = window.path_to_editor[str(file_path)]
+    assert editor.toPlainText() == "application simpleFoam;"
+
+    # Modifica o arquivo externamente
+    file_path.write_text("application pimpleFoam;\nendTime 100;", encoding="utf-8")
+    window._on_external_file_changed(str(file_path))
+
+    assert editor.toPlainText() == "application pimpleFoam;\nendTime 100;"
+
+
+def test_arquivo_excluido_externamente(window, tmp_path):
+    file_path = tmp_path / "system" / "fvSchemes"
+    file_path.parent.mkdir(parents=True)
+    file_path.write_text("ddtSchemes default Euler;", encoding="utf-8")
+
+    window.open_file_in_tab(str(file_path), "ddtSchemes default Euler;")
+    assert str(file_path) in window.path_to_editor
+
+    # Exclui o arquivo no disco
+    file_path.unlink()
+    window._on_external_file_changed(str(file_path))
+
+    idx = window.editor_tabs.indexOf(window.path_to_editor[str(file_path)].parentWidget())
+    assert "[excluído]" in window.editor_tabs.tabText(idx)
+
+
+def test_clique_pasta_alterna_expansao(qapp, tmp_path):
+    from gafoam.filebrowser import FileBrowser
+
+    sub_dir = tmp_path / "subfolder"
+    sub_dir.mkdir()
+
+    browser = FileBrowser(parent=None)
+    browser.set_root(str(tmp_path))
+
+    idx = browser.file_model.index(str(sub_dir))
+    assert browser.file_model.isDir(idx)
+    assert not browser.file_view.isExpanded(idx)
+
+    # Simula clique na pasta
+    browser._on_tree_clicked(idx)
+    assert browser.file_view.isExpanded(idx)
+
+    # Segundo clique recolhe
+    browser._on_tree_clicked(idx)
+    assert not browser.file_view.isExpanded(idx)
+
+

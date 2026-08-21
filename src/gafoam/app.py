@@ -1,9 +1,16 @@
 import os
 import sys
+import shutil
+import subprocess
 
-# Garante compatibilidade do pipeline VTK com o servidor gráfico X11/WSLg
+# Garante compatibilidade do pipeline VTK e layout de teclado no X11/WSLg
 if sys.platform.startswith("linux"):
     os.environ.setdefault("VTK_DISABLE_SHM", "1")
+    try:
+        if shutil.which("setxkbmap"):
+            subprocess.run(["setxkbmap", "-model", "abnt2", "-layout", "br"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont

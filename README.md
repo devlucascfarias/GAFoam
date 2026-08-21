@@ -110,17 +110,28 @@ GAFoam/
 - An OpenFOAM environment sourced in your shell (e.g. OpenFOAM v2012+, v2212+, v2312+, or OpenFOAM-9/10/11)
 - Linux / Ubuntu / WSL2 (Windows Subsystem for Linux with WSLg)
 
-### 1. Install Dependencies
+### Automated 1-Step Installation (Recommended)
+Run the automated installer in your current shell:
 ```bash
-pip install -r requirements.txt
+source ./install.sh
+```
+*(or `./install.sh`)*
+This will:
+1. Create a dedicated virtual environment in `~/.local/share/gafoam/venv`.
+2. Automatically install all required dependencies and the `gafoam` package.
+3. Create the `gafoam` executable in `~/.local/bin` (added to your `PATH`).
+4. Auto-configure ABNT2 Brazilian keyboard support and desktop application entry.
+
+Once installed, simply run from any directory without needing to activate any virtual environment:
+```bash
+gafoam
+# or open a specific case directly:
+gafoam /path/to/openfoam/case
 ```
 
-### 2. Run GAFoam
+### Manual Installation
 ```bash
-# Source your OpenFOAM environment (if not already in ~/.bashrc)
-source /opt/openfoam*/etc/bashrc
-
-# Launch GAFoam
+pip install -r requirements.txt
 python3 main.py
 ```
 

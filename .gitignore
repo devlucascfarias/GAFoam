@@ -6,4 +6,8 @@ __pycache__/
 caso_teste/
 relatorio_parcial_pibiti.*
 CODE_GUIDE.md
+*.egg-info/
+build/
+dist/
+*.docx
 

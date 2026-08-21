@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtGui import QAction, QIcon, QFont, QKeySequence, QPalette, QColor, QTextCursor, QPixmap
-from PySide6.QtCore import QProcess, Qt, QSize, QTimer
+from PySide6.QtCore import QProcess, Qt, QSize, QTimer, QFileSystemWatcher
 
 from gafoam import foamdict, logparse
 from gafoam.bc_editor import BoundaryConditionEditor
@@ -142,6 +142,12 @@ class MainWindow(QMainWindow):
 
         self.path_to_editor = {}
         self.editor_to_path = {}
+        self.file_clean_content = {}
+        self._saving_files = set()
+
+        self.file_watcher = QFileSystemWatcher(self)
+        self.file_watcher.fileChanged.connect(self._on_external_file_changed)
+        self.file_watcher.directoryChanged.connect(self._on_external_directory_changed)
 
         self.current_case = None
 
@@ -369,8 +375,16 @@ class MainWindow(QMainWindow):
             util_menu.addAction(decomp_act)
             util_menu.addAction(recon_act)
             util_menu.addAction(yplus_act)
-            util_menu.addSeparator()
             util_menu.addAction(clean_act)
+            util_menu.addSeparator()
+
+            kb_menu = util_menu.addMenu("Keyboard Layout")
+            abnt_act = QAction("ABNT2 (Português Brasil)", self)
+            abnt_act.triggered.connect(lambda: self.set_keyboard_layout("br", "abnt2"))
+            kb_menu.addAction(abnt_act)
+            us_act = QAction("US (Inglês / Internacional)", self)
+            us_act.triggered.connect(lambda: self.set_keyboard_layout("us", "pc105"))
+            kb_menu.addAction(us_act)
 
             self.util_btn.setMenu(util_menu)
             self.toolbar.addWidget(self.util_btn)
@@ -498,6 +512,103 @@ class MainWindow(QMainWindow):
             return QIcon.fromTheme(fallback_theme)
         return QIcon()
 
+    def _watch_case_directories(self, root_path):
+        """Monitora recursivamente pastas do caso para atualizar árvore e geometrias."""
+        if not root_path or not os.path.isdir(root_path):
+            return
+        for d in list(self.file_watcher.directories()):
+            self.file_watcher.removePath(d)
+        dirs_to_watch = [root_path]
+        try:
+            for root, dirs, _ in os.walk(root_path):
+                for d in dirs:
+                    if not d.startswith('.'):
+                        dirs_to_watch.append(os.path.join(root, d))
+        except Exception:
+            pass
+        for d in dirs_to_watch:
+            if os.path.isdir(d) and d not in self.file_watcher.directories():
+                self.file_watcher.addPath(d)
+
+    def _on_external_directory_changed(self, dir_path):
+        """Trata inclusões/exclusões externas de arquivos e pastas no caso."""
+        if self.current_case:
+            self.geom_view.refresh_scan()
+            try:
+                for root, dirs, _ in os.walk(dir_path):
+                    for d in dirs:
+                        full_d = os.path.join(root, d)
+                        if os.path.isdir(full_d) and full_d not in self.file_watcher.directories():
+                            self.file_watcher.addPath(full_d)
+            except Exception:
+                pass
+
+    def _on_external_file_changed(self, file_path):
+        """Recarrega arquivos editados ou marca arquivos excluídos externamente."""
+        if file_path in self._saving_files:
+            return
+        if file_path not in self.path_to_editor:
+            return
+
+        editor = self.path_to_editor[file_path]
+
+        # Caso 1: O arquivo foi excluído externamente
+        if not os.path.exists(file_path):
+            self.log(f"Arquivo excluído no disco: {file_path}\n")
+            idx = self.editor_tabs.indexOf(editor.parentWidget())
+            if idx != -1:
+                base_name = os.path.basename(file_path)
+                self.editor_tabs.setTabText(idx, f"{base_name} [excluído]")
+            return
+
+        # Re-adiciona ao watcher caso o SO desvincule no evento de escrita atômica
+        if file_path not in self.file_watcher.files():
+            self.file_watcher.addPath(file_path)
+
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                new_content = f.read()
+        except Exception:
+            try:
+                with open(file_path, 'r', encoding='latin1', errors='replace') as f:
+                    new_content = f.read()
+            except Exception:
+                return
+
+        current_editor_text = editor.toPlainText()
+        if new_content == current_editor_text:
+            return
+
+        clean_text = self.file_clean_content.get(file_path, "")
+        is_dirty = (current_editor_text != clean_text)
+
+        if is_dirty:
+            resp = QMessageBox.question(
+                self,
+                "Arquivo Modificado Externamente",
+                f"O arquivo '{os.path.basename(file_path)}' foi modificado externamente.\n\n"
+                f"Deseja recarregar o conteúdo do disco e descartar suas alterações locais?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if resp != QMessageBox.Yes:
+                return
+
+        cursor = editor.textCursor()
+        pos = cursor.position()
+        editor.blockSignals(True)
+        editor.setPlainText(new_content)
+        editor.blockSignals(False)
+        self.file_clean_content[file_path] = new_content
+
+        cursor.setPosition(min(pos, len(new_content)))
+        editor.setTextCursor(cursor)
+        self.log(f"Arquivo recarregado com alterações externas: {file_path}\n")
+
+        idx = self.editor_tabs.indexOf(editor.parentWidget())
+        if idx != -1:
+            self.editor_tabs.setTabText(idx, os.path.basename(file_path))
+
     def selecionar_caso(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select OpenFOAM Case Directory")
         if not dir_path:
@@ -510,6 +621,7 @@ class MainWindow(QMainWindow):
         self.file_browser.set_root(dir_path)
         self.current_case = dir_path
         self.geom_scanned_case = None
+        self._watch_case_directories(dir_path)
 
         self.editor_stack.setCurrentWidget(self.editor_tabs)
         self.control_dock.show()
@@ -598,6 +710,9 @@ class MainWindow(QMainWindow):
         self.path_to_editor[file_path] = editor
         self.editor_to_path[editor] = file_path
         self.current_file = file_path
+        self.file_clean_content[file_path] = text
+        if os.path.isfile(file_path) and file_path not in self.file_watcher.files():
+            self.file_watcher.addPath(file_path)
         self._update_simulation_layout()
 
     def show_geometry(self, file_path=None):
@@ -634,6 +749,9 @@ class MainWindow(QMainWindow):
         editor = widget.editor if hasattr(widget, 'editor') else widget
         path = self.editor_to_path.get(editor)
         if path:
+            self.file_clean_content.pop(path, None)
+            if path in self.file_watcher.files():
+                self.file_watcher.removePath(path)
             del self.path_to_editor[path]
         if editor in self.editor_to_path:
             del self.editor_to_path[editor]
@@ -650,12 +768,19 @@ class MainWindow(QMainWindow):
         path = self.editor_to_path.get(editor)
         if path is None:
             return False
+        self._saving_files.add(path)
         try:
+            content = editor.toPlainText()
             with open(path, 'w', encoding='utf-8') as f:
-                f.write(editor.toPlainText())
+                f.write(content)
+            self.file_clean_content[path] = content
+            if os.path.isfile(path) and path not in self.file_watcher.files():
+                self.file_watcher.addPath(path)
             return True
         except Exception:
             return False
+        finally:
+            self._saving_files.discard(path)
 
     def save_file_as(self, path):
         editor = self.current_editor()
@@ -1425,6 +1550,19 @@ class MainWindow(QMainWindow):
                 "Pre-flight Check: Passed",
                 "✓ All case checks passed!\n\n• Directories (0, constant, system): OK\n• Mesh (constant/polyMesh): OK\n• Dictionaries (controlDict, fvSchemes, fvSolution): OK"
             )
+
+    def set_keyboard_layout(self, layout="br", model="abnt2"):
+        """Configura o layout de teclado no servidor gráfico X11/WSLg."""
+        try:
+            if shutil.which("setxkbmap"):
+                cmd = ["setxkbmap", "-model", model, "-layout", layout]
+                subprocess.run(cmd, check=False)
+                self.log(f"Layout de teclado configurado para: {layout.upper()} ({model})\n")
+                QMessageBox.information(self, "Layout de Teclado", f"Teclado configurado para {layout.upper()} ({model}) com sucesso!")
+            else:
+                QMessageBox.warning(self, "Layout de Teclado", "Utilitário 'setxkbmap' não encontrado no sistema.")
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Não foi possível alterar o layout:\n{e}")
 
     def run_simulation(self):
         """Executa `./Allrun` dentro do diretório do caso, se existir."""

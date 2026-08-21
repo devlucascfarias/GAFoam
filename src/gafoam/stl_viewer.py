@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QScrollArea, QCheckBox, 
     QListWidget, QListWidgetItem, QSlider, QGroupBox, 
     QFormLayout, QFileDialog, QMessageBox, QTableWidget,
-    QTableWidgetItem, QHeaderView, QDialog, QDialogButtonBox
+    QTableWidgetItem, QHeaderView, QDialog, QDialogButtonBox,
+    QSizePolicy
 )
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QIcon, QFont
@@ -115,6 +116,8 @@ class STLViewer(QWidget):
         self.lbl_render.setAlignment(Qt.AlignCenter)
         self.lbl_render.setStyleSheet("background-color: #ffffff;")
         self.lbl_render.setFocusPolicy(Qt.ClickFocus)
+        self.lbl_render.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.lbl_render.setMinimumSize(100, 100)
         self.layout.addWidget(self.lbl_render)
 
         self.plotter = pv.Plotter(off_screen=True, window_size=(800, 600))
@@ -149,18 +152,16 @@ class STLViewer(QWidget):
         """Renderiza a cena tridimensional e atualiza o buffer gráfico."""
         if not self.plotter:
             return
-        w = max(200, self.width())
-        h = max(200, self.height())
+        w = max(100, self.lbl_render.width(), self.width())
+        h = max(100, self.lbl_render.height(), self.height())
         self.plotter.window_size = (w, h)
         try:
             img = self.plotter.screenshot(return_img=True)
             if img is not None and len(img.shape) == 3:
                 ih, iw, ic = img.shape
                 bytes_per_line = ic * iw
-                qimg = QImage(img.data, iw, ih, bytes_per_line, QImage.Format_RGB888)
-                self.lbl_render.setPixmap(QPixmap.fromImage(qimg).scaled(
-                    self.lbl_render.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
-                ))
+                qimg = QImage(img.data.tobytes(), iw, ih, bytes_per_line, QImage.Format_RGB888)
+                self.lbl_render.setPixmap(QPixmap.fromImage(qimg))
         except Exception:
             pass
 
@@ -184,13 +185,31 @@ class STLViewer(QWidget):
         self._last_pos = event.pos()
 
         if event.buttons() & Qt.LeftButton:
-            self.plotter.camera.azimuth(-dx * 0.5)
-            self.plotter.camera.elevation(dy * 0.5)
+            # Rotação orbital
+            self.plotter.camera.Azimuth(-dx * 0.5)
+            self.plotter.camera.Elevation(dy * 0.5)
             self.update_render()
         elif event.buttons() & Qt.RightButton or event.buttons() & Qt.MiddleButton:
-            # Pan
+            # Pan (translação)
             cam = self.plotter.camera
-            cam.azimuth(-dx * 0.2)
+            pos = np.array(cam.position, dtype=float)
+            foc = np.array(cam.focal_point, dtype=float)
+            up = np.array(cam.up, dtype=float)
+            v_dir = foc - pos
+            dist = np.linalg.norm(v_dir)
+            right = np.cross(v_dir, up)
+            r_norm = np.linalg.norm(right)
+            if r_norm > 1e-6:
+                right /= r_norm
+            true_up = np.cross(right, v_dir)
+            u_norm = np.linalg.norm(true_up)
+            if u_norm > 1e-6:
+                true_up /= u_norm
+            
+            pan_scale = max(dist * 0.002, 1e-4)
+            shift = (-dx * right + dy * true_up) * pan_scale
+            cam.position = tuple(pos + shift)
+            cam.focal_point = tuple(foc + shift)
             self.update_render()
 
     def wheelEvent(self, event):
@@ -914,38 +933,6 @@ class CaseGeometryWidget(QWidget):
         for p in patches:
             faces_info = f" ({p['faces']} faces)" if p.get('faces') != 'all' else ""
             self.list_patches.addItem(f"{p['name']}{faces_info}")
-
-    def set_cam_view(self, view):
-        if not self.viewer.plotter:
-            return
-        if view == "iso":
-            self.viewer.plotter.view_isometric()
-        elif view == "xy":
-            self.viewer.plotter.view_xy()
-        elif view == "xz":
-            self.viewer.plotter.view_xz()
-        self.viewer.plotter.reset_camera()
-
-    def take_screenshot(self):
-        if not self.viewer.plotter or not self.current_case_path:
-            return
-            
-        timestamp = int(time.time())
-        default_name = f"screenshot_geometria_{timestamp}.png"
-        
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Salvar Captura de Tela", 
-            os.path.join(self.current_case_path, default_name),
-            "Imagens PNG (*.png)"
-        )
-        
-        if file_path:
-            try:
-                self.viewer.plotter.screenshot(file_path)
-                if hasattr(self.main_window, 'log'):
-                    self.main_window.log(f"Captura de tela salva com sucesso em: {file_path}\n")
-            except Exception as e:
-                print(f"Erro ao salvar screenshot: {e}")
 
     def create_mesh_icon(self, color_hex="#0f62fe"):
         pixmap = QPixmap(16, 16)

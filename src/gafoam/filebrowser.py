@@ -82,8 +82,19 @@ class FileBrowser:
         self.file_view.setSortingEnabled(True)
         self.file_view.setMinimumWidth(int(260 * self.scale))
         self.file_view.setIconSize(QSize(int(18 * self.scale), int(18 * self.scale)))
+        self.file_view.clicked.connect(self._on_tree_clicked)
+
+    def _on_tree_clicked(self, index):
+        if not index.isValid():
+            return
+        if self.file_model.isDir(index):
+            if self.file_view.isExpanded(index):
+                self.file_view.collapse(index)
+            else:
+                self.file_view.expand(index)
 
     def set_root(self, path):
+        self.file_model.setRootPath(path)
         self.file_view.setRootIndex(self.file_model.index(path))
 
     def set_click_callback(self, callback):
