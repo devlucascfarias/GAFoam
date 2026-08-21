@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtGui import QAction, QIcon, QFont, QKeySequence, QPalette, QColor, QTextCursor, QPixmap
-from PySide6.QtCore import QProcess, Qt, QSize, QTimer, QFileSystemWatcher
+from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QSize, QTimer, QFileSystemWatcher
 
 from gafoam import foamdict, logparse
 from gafoam.bc_editor import BoundaryConditionEditor

@@ -1,6 +1,7 @@
 def make_stdout_handler(window):
     def handler():
-        data = window.process.readAllStandardOutput().data().decode()
+        raw = window.process.readAllStandardOutput().data()
+        data = bytes(raw).decode("utf-8", errors="replace")
 
         if hasattr(window, 'log'):
             window.log(data)
@@ -15,7 +16,8 @@ def make_stdout_handler(window):
 
 def make_stderr_handler(window):
     def handler():
-        data = window.process.readAllStandardError().data().decode()
+        raw = window.process.readAllStandardError().data()
+        data = bytes(raw).decode("utf-8", errors="replace")
         if hasattr(window, 'log'):
             window.log(f"[ERR] {data}")
         elif hasattr(window, 'log_view'):
