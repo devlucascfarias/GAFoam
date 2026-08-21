@@ -160,7 +160,9 @@ class STLViewer(QWidget):
             if img is not None and len(img.shape) == 3:
                 ih, iw, ic = img.shape
                 bytes_per_line = ic * iw
-                qimg = QImage(img.data.tobytes(), iw, ih, bytes_per_line, QImage.Format_RGB888)
+                img_c = np.ascontiguousarray(img)
+                qimg = QImage(img_c.data, iw, ih, bytes_per_line, QImage.Format_RGB888).copy()
+                self.lbl_render.setPixmap(QPixmap.fromImage(qimg))
         except Exception as e:
             print(f"Error in update_render: {e}")
 
