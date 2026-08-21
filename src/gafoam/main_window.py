@@ -1355,6 +1355,11 @@ class MainWindow(QMainWindow):
             self.residuals_view.setVisible(False)
             self.show_tab("Console")
         self._update_simulation_layout()
+
+        env = QProcessEnvironment.systemEnvironment()
+        for k, v in os.environ.items():
+            env.insert(k, v)
+        self.process.setProcessEnvironment(env)
             
         try:
             self.process.start(command, args)
@@ -1463,7 +1468,16 @@ class MainWindow(QMainWindow):
         if not os.path.exists(mesh_sh_path):
             try:
                 content = (
-                    "#!/usr/bin/env bash\n"
+                    "#!/usr/bin/env bash\n\n"
+                    "# Auto-detect and source OpenFOAM if not sourced\n"
+                    "if [ -z \"$WM_PROJECT_DIR\" ]; then\n"
+                    "    for rc in /opt/openfoam*/etc/bashrc /usr/lib/openfoam*/etc/bashrc /usr/lib/openfoam/openfoam*/etc/bashrc \"$HOME\"/OpenFOAM/OpenFOAM-*/etc/bashrc; do\n"
+                    "        if [ -f \"$rc\" ]; then\n"
+                    "            . \"$rc\" 2>/dev/null || true\n"
+                    "            break\n"
+                    "        fi\n"
+                    "    done\n"
+                    "fi\n\n"
                     "set -e\n"
                     "cd \"${0%/*}\" || exit 1\n\n"
                     ". $WM_PROJECT_DIR/bin/tools/RunFunctions 2>/dev/null || true\n\n"

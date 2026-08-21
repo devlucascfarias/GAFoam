@@ -58,6 +58,17 @@ if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     fi
 fi
 
+# Auto-detect OpenFOAM environment
+if ! grep -q 'openfoam.*/etc/bashrc' "$HOME/.bashrc" 2>/dev/null; then
+    for rc in /opt/openfoam*/etc/bashrc /usr/lib/openfoam*/etc/bashrc /usr/lib/openfoam/openfoam*/etc/bashrc; do
+        if [ -f "$rc" ]; then
+            echo "source $rc 2>/dev/null || true" >> "$HOME/.bashrc"
+            echo "✓ Configured OpenFOAM environment ($rc) in ~/.bashrc"
+            break
+        fi
+    done
+fi
+
 # Try global /usr/local/bin link if writable
 if [ -w /usr/local/bin ]; then
     ln -sf "$BIN_DIR/gafoam" /usr/local/bin/gafoam 2>/dev/null || true
