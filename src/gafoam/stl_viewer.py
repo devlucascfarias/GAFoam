@@ -110,14 +110,8 @@ class STLViewer(QWidget):
         super().__init__(parent)
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        
-        try:
-            self.plotter = QtInteractor(self)
-            self.layout.addWidget(self.plotter.interactor)
-            self.plotter.set_background("white")
-        except Exception as e:
-            self.layout.addWidget(QLabel(f"Erro ao inicializar visualizador 3D: {e}"))
-            self.plotter = None
+        self.plotter = None
+        self._initialized = False
             
         self.actors = {}
         self.meshes = {} # Armazena os objetos pyvista.PolyData originais
@@ -141,8 +135,29 @@ class STLViewer(QWidget):
         self.measurement_actor = None
         self.clip_active = False
 
+    def ensure_plotter(self):
+        """Inicializa o QtInteractor somente quando o widget estiver visível e mapeado pelo X11."""
+        if self.plotter is not None:
+            return self.plotter
+        if self._initialized:
+            return None
+        self._initialized = True
+        try:
+            self.plotter = QtInteractor(self)
+            self.layout.addWidget(self.plotter.interactor)
+            self.plotter.set_background("white")
+        except Exception as e:
+            self.layout.addWidget(QLabel(f"Visualizador 3D (PyVista): {e}"))
+            self.plotter = None
+        return self.plotter
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.ensure_plotter()
+
     def load_meshes(self, files_list):
         """Carrega e renderiza simultaneamente todas as malhas listadas com cores distintas e superfícies lisas."""
+        self.ensure_plotter()
         if not self.plotter:
             return
             

@@ -1,6 +1,9 @@
-"""Inicialização da aplicação."""
-
+import os
 import sys
+
+# Garante compatibilidade do pipeline VTK com o servidor gráfico X11/WSLg
+if sys.platform.startswith("linux"):
+    os.environ.setdefault("VTK_DISABLE_SHM", "1")
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
