@@ -93,3 +93,48 @@ def test_texto_sem_dados_nao_produz_valores():
 
 def test_texto_vazio():
     assert logparse.parse_residuals("") == ({}, None)
+
+
+def test_parse_all_time_steps():
+    log = (
+        "Time = 0.001s\n"
+        "smoothSolver:  Solving for Ux, Initial residual = 0.1, Final residual = 1e-6\n"
+        "GAMG:  Solving for p, Initial residual = 0.05, Final residual = 1e-5\n"
+        "Time = 0.002s\n"
+        "smoothSolver:  Solving for Ux, Initial residual = 0.02, Final residual = 1e-6\n"
+        "GAMG:  Solving for p, Initial residual = 0.008, Final residual = 1e-5\n"
+    )
+    steps = logparse.parse_all_time_steps(log)
+    assert len(steps) == 2
+    assert steps[0][1] == pytest.approx(0.001)
+    assert steps[0][0]["p"] == pytest.approx(0.05)
+    assert steps[1][1] == pytest.approx(0.002)
+    assert steps[1][0]["p"] == pytest.approx(0.008)
+
+
+def test_detect_divergence_nan():
+    alerts = logparse.detect_divergence({"p": "NaN", "U": 0.001})
+    assert len(alerts) >= 1
+    assert any(a.type == "nan" and a.variable == "p" for a in alerts)
+
+
+def test_detect_divergence_courant():
+    alerts = logparse.detect_divergence({"Co max": 15.5, "p": 0.001}, co_limit=10.0)
+    assert len(alerts) >= 1
+    assert any(a.type == "courant_exceeded" for a in alerts)
+
+
+def test_detect_divergence_spike():
+    prev = {"p": 0.0001, "U": 0.001}
+    curr = {"p": 0.05, "U": 0.001} # 500x increase
+    alerts = logparse.detect_divergence(curr, prev)
+    assert len(alerts) >= 1
+    assert any(a.type == "residual_spike" and a.variable == "p" for a in alerts)
+
+
+def test_detect_divergence_in_text():
+    text = "Foam::error::printStack - Floating point exception\n#0 0x7f12345 in printStack"
+    alerts = logparse.detect_divergence_in_text(text)
+    assert len(alerts) >= 1
+    assert any(a.type == "floating_point_exception" for a in alerts)
+

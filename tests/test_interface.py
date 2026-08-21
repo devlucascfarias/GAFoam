@@ -55,9 +55,13 @@ def _titulos(tab_widget):
 
 def test_janela_monta_paineis_principais(window):
     assert "Console" in _titulos(window.tab_widget)
-    assert "Simulação" in _titulos(window.tab_widget)
+    assert "Simulation" in _titulos(window.tab_widget)
+    assert "Boundary Conditions" in _titulos(window.tab_widget)
     assert window.control_dock is not None
+    assert window.fv_schemes_dock is not None
+    assert window.fv_solution_dock is not None
     assert window.toolbar is not None
+
 
 
 def test_grafico_de_residuos_comeca_oculto(window):
@@ -66,7 +70,7 @@ def test_grafico_de_residuos_comeca_oculto(window):
 
 def test_geometria_nao_ocupa_o_editor_por_padrao(window):
     """O painel 3D só deve existir depois que uma malha for aberta."""
-    assert "Geometria" not in _titulos(window.editor_tabs)
+    assert "Geometry" not in _titulos(window.editor_tabs)
     assert window.editor_tabs.indexOf(window.geom_view) == -1
     assert window.geom_view.scanned == []
 
@@ -74,7 +78,7 @@ def test_geometria_nao_ocupa_o_editor_por_padrao(window):
 def test_abrir_malha_cria_a_aba_de_geometria(window):
     window.show_geometry("/tmp/peca.stl")
 
-    assert "Geometria" in _titulos(window.editor_tabs)
+    assert "Geometry" in _titulos(window.editor_tabs)
     assert window.editor_tabs.currentWidget() is window.geom_view
 
 
@@ -97,7 +101,7 @@ def test_reabrir_geometria_reaproveita_a_mesma_aba(window):
     window.show_geometry("/tmp/a.stl")
     window.show_geometry("/tmp/b.stl")
 
-    assert _titulos(window.editor_tabs).count("Geometria") == 1
+    assert _titulos(window.editor_tabs).count("Geometry") == 1
 
 
 def test_caso_e_varrido_uma_unica_vez(window, case_dir):
@@ -109,16 +113,15 @@ def test_caso_e_varrido_uma_unica_vez(window, case_dir):
     assert window.geom_view.scanned == [str(case_dir)]
 
 
-def test_fechar_a_aba_de_geometria_preserva_o_painel(window):
+def test_aba_de_geometria_e_permanente(window):
     window.show_geometry("/tmp/a.stl")
     index = window.editor_tabs.indexOf(window.geom_view)
 
     window.on_tab_close_requested(index)
 
-    assert "Geometria" not in _titulos(window.editor_tabs)
-    # Reabrir deve funcionar: o widget não foi destruído.
-    window.show_geometry("/tmp/a.stl")
-    assert "Geometria" in _titulos(window.editor_tabs)
+    # Permanece aberta pois é permanente
+    assert "Geometry" in _titulos(window.editor_tabs)
+
 
 
 def test_arquivo_de_malha_nao_abre_no_editor(window, tmp_path):
@@ -158,12 +161,12 @@ def test_monitor_de_convergencia_marca_valores(qapp, case_dir):
     monitor.update_residual("p", 1e-3)
     monitor.update_residual("U", 1e-2)
 
+    assert monitor.table.columnCount() == 3
     assert monitor.table.rowCount() == 2
-    # Metas vindas do residualControl do fvSolution da fixture.
-    assert monitor.table.item(0, 2).text() == "1.0e-02"
-    assert monitor.table.item(1, 2).text() == "1.0e-03"
-    assert monitor.table.item(0, 1).toolTip() == "Convergido!"
-    assert monitor.table.item(1, 1).toolTip() == ""
+    assert monitor.table.item(0, 0).text() == "p"
+    assert "Converged" in monitor.table.item(0, 2).text()
+    assert monitor.table.item(1, 0).text() == "U"
+    assert "Iterating" in monitor.table.item(1, 2).text()
 
 
 def test_dock_do_control_dict_carrega_parametros(qapp, case_dir):
@@ -186,3 +189,37 @@ def test_dock_desabilita_sem_caso(qapp, tmp_path):
     dock.load_case(str(tmp_path))
 
     assert not dock.isEnabled()
+
+
+def test_qualidade_da_geometria_stl(tmp_path):
+    from gafoam.stl_viewer import check_mesh_quality
+    import pyvista as pv
+
+    # Cria uma esfera fechada (watertight)
+    sphere = pv.Sphere()
+    diag = check_mesh_quality(sphere)
+
+    assert diag is not None
+    assert diag["is_watertight"] is True
+    assert diag["open_edges"] == 0
+    assert diag["area"] > 0
+    assert diag["volume"] > 0
+
+
+def test_deteccao_de_patches_stl(tmp_path):
+    from gafoam.stl_viewer import detect_stl_patches
+
+    stl_file = tmp_path / "multisolid.stl"
+    stl_file.write_text(
+        "solid wing\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 1 1 0\nendloop\nendfacet\nendsolid wing\n"
+        "solid fuselage\nfacet normal 0 1 0\nouter loop\nvertex 0 0 0\nvertex 0 1 0\nvertex 0 1 1\nendloop\nendfacet\nendsolid fuselage\n",
+        encoding="utf-8"
+    )
+
+    patches = detect_stl_patches(str(stl_file))
+    assert len(patches) == 2
+    assert patches[0]["name"] == "wing"
+    assert patches[0]["faces"] == 1
+    assert patches[1]["name"] == "fuselage"
+    assert patches[1]["faces"] == 1
+

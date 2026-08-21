@@ -11,19 +11,27 @@ MODULOS_SEM_GUI = ["gafoam", "gafoam.foamdict", "gafoam.foamlint", "gafoam.logpa
 
 MODULOS_COM_GUI = [
     "gafoam.app",
+    "gafoam.bc_editor",
     "gafoam.editor",
     "gafoam.filebrowser",
     "gafoam.handlers",
     "gafoam.main_window",
     "gafoam.menus",
     "gafoam.panels",
+    "gafoam.report",
     "gafoam.residuals",
     "gafoam.stl_viewer",
     "gafoam.terminal",
 ]
 
-# Ícones referenciados pela barra de ferramentas.
-ICONES = ["open_case.svg", "run_allrun.svg", "stop_process.svg", "gear.svg"]
+# Ícones referenciados pela barra de ferramentas, abas e explorador de arquivos.
+ICONES = [
+    "open_case.svg", "run_allrun.svg", "stop_process.svg", "gear.svg", 
+    "cmd_dollar.svg", "close_tab.svg", "gafoam_logo.svg", "folder.svg", 
+    "file_dict.svg", "file_mesh.svg", "file_script.svg", "file_pdf.svg", 
+    "file_foam.svg", "file_generic.svg"
+]
+
 
 
 @pytest.mark.parametrize("nome", MODULOS_SEM_GUI)
@@ -46,3 +54,14 @@ def test_icon_path_dentro_do_pacote():
 
     assert os.path.isabs(caminho)
     assert caminho.endswith(os.path.join("gafoam", "icons", "open_case.svg"))
+
+
+def test_fontes_presentes_no_pacote():
+    assert os.path.isfile(resources.font_path("FiraCode-Regular.ttf"))
+    assert os.path.isfile(resources.font_path("FiraCode-Medium.ttf"))
+    assert os.path.isfile(resources.font_path("FiraCode-Bold.ttf"))
+
+
+def test_carregamento_de_fontes(qapp):
+    familias = resources.load_application_fonts()
+    assert any("Fira Code" in f for f in familias)

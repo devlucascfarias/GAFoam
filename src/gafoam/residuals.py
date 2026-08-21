@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton, QLabel, QToolTip
 from PySide6.QtCore import Qt, QPointF
-from PySide6.QtGui import QPainter, QPen, QColor
+from PySide6.QtGui import QPainter, QPen, QColor, QFont
 
 try:
     from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis, QLogValueAxis
@@ -41,34 +41,9 @@ class ResidualsWidget(QWidget):
             layout.addWidget(self.placeholder)
             return
 
-        # Painel de controles superiores
-        controls = QHBoxLayout()
-        self.scale_selector = QComboBox()
-        self.scale_selector.addItem("Escala: Linear", "linear")
-        self.scale_selector.addItem("Escala: Logarítmica", "loglog")
-        self.scale_selector.currentIndexChanged.connect(self._on_settings_changed)
-
-        self.xaxis_selector = QComboBox()
-        self.xaxis_selector.addItem("Eixo X: Tempo", "time")
-        self.xaxis_selector.addItem("Eixo X: Iterações", "iterations")
-        self.xaxis_selector.currentIndexChanged.connect(self._on_settings_changed)
-
-        self.filter_selector = QComboBox()
-        self.filter_selector.addItem("Filtro: Todos", "all")
-        self.filter_selector.addItem("Filtro: Velocidades", "velocities")
-        self.filter_selector.addItem("Filtro: Pressão", "pressure")
-        self.filter_selector.addItem("Filtro: Turbulência", "turbulence")
-        self.filter_selector.currentIndexChanged.connect(self._on_settings_changed)
-
-        self.clear_btn = QPushButton("Limpar")
-        self.clear_btn.clicked.connect(self.clear_history)
-
-        controls.addWidget(self.scale_selector)
-        controls.addWidget(self.xaxis_selector)
-        controls.addWidget(self.filter_selector)
-        controls.addStretch(1)
-        controls.addWidget(self.clear_btn)
-        layout.addLayout(controls)
+        self.scale_mode = "loglog"
+        self.xaxis_mode = "time"
+        self.filter_mode = "all"
 
         # Configuração do Gráfico QtCharts
         self.chart = QChart()
@@ -80,7 +55,10 @@ class ResidualsWidget(QWidget):
         self.chart.setBackgroundBrush(QColor("#f4f4f4"))
         self.chart.setTitleBrush(QColor("#161616"))
         self.chart.legend().setVisible(True)
-        self.chart.legend().setAlignment(Qt.AlignBottom)
+        self.chart.legend().setAlignment(Qt.AlignRight)
+        legend_font = QFont("Inter", 8)
+        self.chart.legend().setFont(legend_font)
+
         self.chart.legend().setBackgroundVisible(True)
         self.chart.legend().setBrush(QColor("#f4f4f4"))
         self.chart.legend().setPen(QColor("#c6c6c6"))
@@ -92,7 +70,7 @@ class ResidualsWidget(QWidget):
         self.time_history = {}
         self.series_dict = {}
         self.series_visible = {}
-        self.max_points = 200
+        self.max_points = 3000
         
         # Paleta de cores moderna para curvas
         self._colors = [
@@ -103,11 +81,6 @@ class ResidualsWidget(QWidget):
         self.axis_x = None
         self.axis_y = None
         self._setup_axes()
-
-    def _on_settings_changed(self):
-        """Reconfigura eixos e atualiza as curvas quando a escala ou tipo de eixo X são alterados."""
-        self._setup_axes()
-        self._refresh()
 
     def update_residuals(self, res_dict: dict, sim_time=None):
         """Recebe novos resíduos e insere no gráfico dinamicamente."""
@@ -142,6 +115,7 @@ class ResidualsWidget(QWidget):
         self.time_history = {}
         self.chart.removeAllSeries()
         self.series_dict = {}
+        self._connected_markers = set()
         self._setup_axes()
 
     def _setup_axes(self):
@@ -154,23 +128,31 @@ class ResidualsWidget(QWidget):
         if self.axis_y:
             self.chart.removeAxis(self.axis_y)
             
-        mode = self.scale_selector.currentData()
-        x_mode = self.xaxis_selector.currentData()
+        mode = getattr(self, 'scale_mode', 'loglog')
+        x_mode = getattr(self, 'xaxis_mode', 'time')
         
-        # Eixo X
-        self.axis_x = QValueAxis()
-        x_label = 'Tempo de Simulação (s)' if x_mode == "time" else 'Iterações'
-        self.axis_x.setTitleText(x_label)
+        # Eixo X (Logarítmico para Time em logxlog)
+        if mode == "loglog" and x_mode == "time":
+            self.axis_x = QLogValueAxis()
+            self.axis_x.setBase(10.0)
+            self.axis_x.setRange(1e-5, 10.0)
+            self.axis_x.setLabelFormat("%.0e")
+        else:
+            self.axis_x = QValueAxis()
+            self.axis_x.setLabelFormat("%.4f")
+            
+        self.axis_x.setTitleText('Tempo de Simulação (s)' if x_mode == "time" else 'Iterações')
         self.axis_x.setLabelsColor(QColor("#525252"))
         self.axis_x.setGridLinePen(QPen(QColor("#cccccc"), 0.8)) # Grade principal visível
         self.axis_x.setMinorGridLineVisible(True)                 # Subgrade quadriculada
         self.axis_x.setMinorGridLinePen(QPen(QColor("#e5e5e5"), 0.5, Qt.DashLine))
         self.chart.addAxis(self.axis_x, Qt.AlignBottom)
         
-        # Eixo Y (Linear ou Logarítmico)
+        # Eixo Y (Logarítmico)
         if mode == "loglog":
             self.axis_y = QLogValueAxis()
             self.axis_y.setBase(10.0)
+            self.axis_y.setRange(1e-12, 1.0)
             self.axis_y.setLabelFormat("%.0e")
         else:
             self.axis_y = QValueAxis()
@@ -192,20 +174,25 @@ class ResidualsWidget(QWidget):
         if not QTCHARTS_AVAILABLE:
             return
             
-        mode = self.scale_selector.currentData()
-        x_mode = self.xaxis_selector.currentData()
-        filter_mode = self.filter_selector.currentData()
+        mode = getattr(self, 'scale_mode', 'loglog')
+        filter_mode = getattr(self, 'filter_mode', 'all')
+        x_mode = getattr(self, 'xaxis_mode', 'time')
         
-        min_x, max_x = float('inf'), float('-inf')
-        min_y, max_y = float('inf'), float('-inf')
+        min_x = float('inf')
+        max_x = float('-inf')
+        min_y = float('inf')
+        max_y = float('-inf')
+        
         plotted = 0
         
         for name, hist in self.history.items():
-            if len(hist) < 2:
+            if not hist:
                 continue
                 
-            if x_mode == "time" and name in self.time_history and len(self.time_history[name]) == len(hist):
-                x_vals = self.time_history[name]
+            if x_mode == "time":
+                x_vals = self.time_history.get(name, [])
+                if len(x_vals) != len(hist):
+                    x_vals = list(range(len(hist)))
             else:
                 x_vals = list(range(len(hist)))
                 
@@ -232,21 +219,22 @@ class ResidualsWidget(QWidget):
             series = self.series_dict[name]
             points = []
             
-            # Ignora as 3 primeiras iterações para evitar que o pico transiente inicial
-            # distorça os limites do eixo Y, permitindo um "zoom" nas curvas de convergência estabilizada.
+            # Ignora as primeiras iterações para cálculo dos limites
             ignore_count = 3 if len(hist) > 6 else (1 if len(hist) > 3 else 0)
             calc_x = x_vals[ignore_count:]
             calc_hist = hist[ignore_count:]
 
             for x, y in zip(x_vals, hist):
-                if mode == "loglog" and y <= 0:
-                    y = 1e-12 # Valor mínimo seguro para escala log
+                if mode == "loglog":
+                    x = max(1e-6, float(x))
+                    y = max(1e-12, float(y))
                 points.append(QPointF(x, y))
                 
-            # Calcula limites com base nos dados filtrados (pós-pico transiente)
+            # Calcula limites com base nos dados filtrados
             for x, y in zip(calc_x, calc_hist):
-                if mode == "loglog" and y <= 0:
-                    y = 1e-12
+                if mode == "loglog":
+                    x = max(1e-6, float(x))
+                    y = max(1e-12, float(y))
                 if x < min_x: min_x = x
                 if x > max_x: max_x = x
                 if y < min_y: min_y = y
@@ -270,25 +258,31 @@ class ResidualsWidget(QWidget):
         # Atualiza os limites de exibição dinamicamente
         if plotted:
             if min_x != float('inf') and max_x != float('-inf'):
-                dx = max(1e-5, (max_x - min_x) * 0.02)
-                self.axis_x.setRange(min_x, max_x + dx)
+                if mode == "loglog" and x_mode == "time":
+                    log_min_x = max(1e-6, min_x if min_x > 0 else 1e-6)
+                    log_max_x = max(log_min_x * 1.5, max_x if max_x > 0 else 1.0)
+                    self.axis_x.setRange(log_min_x, log_max_x)
+                else:
+                    dx = max(1e-5, (max_x - min_x) * 0.02)
+                    self.axis_x.setRange(min_x, max_x + dx)
                 
             if min_y != float('inf') and max_y != float('-inf'):
                 if mode == "loglog":
-                    log_min = max(1e-12, min_y)
-                    self.axis_y.setRange(log_min * 0.5, max_y * 2.0)
+                    log_min = max(1e-12, min_y if min_y > 0 else 1e-6)
+                    log_max = max(log_min * 10, max_y * 1.5 if max_y > 0 else 1.0)
+                    self.axis_y.setRange(log_min, log_max)
                 else:
                     dy = max(1e-5, (max_y - min_y) * 0.05)
                     self.axis_y.setRange(min_y - dy, max_y + dy)
 
     def _update_legend_connections(self):
         """Conecta cliques na legenda para ocultar/mostrar curvas."""
+        if not hasattr(self, '_connected_markers'):
+            self._connected_markers = set()
         for marker in self.chart.legend().markers():
-            try:
-                marker.clicked.disconnect()
-            except Exception:
-                pass
-            marker.clicked.connect(self._on_marker_clicked)
+            if marker not in self._connected_markers:
+                marker.clicked.connect(self._on_marker_clicked)
+                self._connected_markers.add(marker)
 
     def _on_marker_clicked(self):
         marker = self.sender()
@@ -315,11 +309,11 @@ class ResidualsWidget(QWidget):
     def _on_point_hovered(self, point, state, series_name):
         """Mostra tooltip moderno com coordenadas do ponto sob o mouse."""
         if state:
-            x_mode = self.xaxis_selector.currentData()
+            x_mode = getattr(self, 'xaxis_mode', 'time')
             x_unit = "s" if x_mode == "time" else "it"
             QToolTip.showText(
                 self.cursor().pos(),
-                f"{series_name}\nX: {point.x():.4f} {x_unit}\nY: {point.y():.2e}",
+                f"{series_name}\nTime: {point.x():.4g} {x_unit}\nResidual: {point.y():.2e}",
                 self
             )
         else:

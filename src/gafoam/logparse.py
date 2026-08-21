@@ -8,6 +8,8 @@ import glob
 import math
 import os
 import re
+from collections import namedtuple
+
 
 RE_TIME = re.compile(r"\bTime\s*[=:]\s*([\d.eE+-]+)")
 RE_RESIDUAL = re.compile(r"Solving for (\w+), Initial residual = ([\d.eE+-]+)")
@@ -104,6 +106,36 @@ def parse_residuals(text):
     return values, sim_time
 
 
+def parse_all_time_steps(text):
+    """Analisa o texto dividindo por passos de tempo (Time = ... ou Time:...).
+    
+    Retorna uma lista de tuplas `(valores, sim_time)` para cada passo de tempo encontrado.
+    """
+    if not text:
+        return []
+
+    matches = list(RE_TIME.finditer(text))
+    if len(matches) <= 1:
+        vals, sim_time = parse_residuals(text)
+        return [(vals, sim_time)] if vals else []
+
+    steps = []
+    for i, match in enumerate(matches):
+        start_idx = match.start()
+        end_idx = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        block = text[start_idx:end_idx]
+        vals, sim_time = parse_residuals(block)
+        if sim_time is None:
+            try:
+                sim_time = float(match.group(1))
+            except ValueError:
+                pass
+        if vals and sim_time is not None:
+            steps.append((vals, sim_time))
+
+    return steps
+
+
 def choose_solver_log_file(case_path):
     """Log do solver a acompanhar no caso.
 
@@ -125,3 +157,97 @@ def choose_solver_log_file(case_path):
     if not candidates:
         return None
     return max(candidates, key=os.path.getmtime)
+
+
+# ---------------------------------------------------------------------------
+# Divergence detection (Feature 5)
+# ---------------------------------------------------------------------------
+
+RE_NAN = re.compile(r"\b[Nn][Aa][Nn]\b")
+RE_FLOATING_POINT_EXCEPTION = re.compile(r"#0\s+Foam::error::printStack|Floating point exception")
+
+DivergenceAlert = namedtuple("DivergenceAlert", ["type", "variable", "message"])
+
+# Residual spike threshold: if a residual jumps by this factor, it's a spike.
+_SPIKE_FACTOR = 100.0
+
+
+def detect_divergence(current_values, previous_values=None, co_limit=10.0):
+    """Analyse current residuals for signs of numerical divergence.
+
+    Parameters
+    ----------
+    current_values : dict
+        Mapping of variable name to its current residual value.
+    previous_values : dict or None
+        Mapping of variable name to its previous residual value.
+    co_limit : float
+        Courant number threshold above which a warning is issued.
+
+    Returns
+    -------
+    list[DivergenceAlert]
+        List of alerts detected.  Empty list means no issues.
+    """
+    alerts = []
+
+    for name, val in current_values.items():
+        # NaN detection
+        val_str = str(val)
+        if RE_NAN.search(val_str):
+            alerts.append(DivergenceAlert(
+                type="nan",
+                variable=name,
+                message=f"NaN detected in '{name}'! Simulation is likely diverging.",
+            ))
+            continue
+
+        try:
+            fval = float(val)
+        except (ValueError, TypeError):
+            continue
+
+        # Courant number exceeded
+        if ("co" in name.lower() or "courant" in name.lower()) and fval > co_limit:
+            alerts.append(DivergenceAlert(
+                type="courant_exceeded",
+                variable=name,
+                message=f"Courant number {name} = {fval:.2f} exceeds limit ({co_limit}).",
+            ))
+
+        # Residual spike detection
+        if previous_values and name in previous_values:
+            try:
+                prev = float(previous_values[name])
+            except (ValueError, TypeError):
+                continue
+            if prev > 0 and fval / prev >= _SPIKE_FACTOR:
+                alerts.append(DivergenceAlert(
+                    type="residual_spike",
+                    variable=name,
+                    message=f"Residual spike in '{name}': {prev:.2e} -> {fval:.2e} ({fval/prev:.0f}x increase).",
+                ))
+
+    return alerts
+
+
+def detect_divergence_in_text(text):
+    """Scan raw log text for fatal divergence markers.
+
+    Returns a list of ``DivergenceAlert`` for NaN tokens or floating-point
+    exception stack traces found in the text.
+    """
+    alerts = []
+    if RE_NAN.search(text):
+        alerts.append(DivergenceAlert(
+            type="nan",
+            variable="(log output)",
+            message="NaN value detected in solver output.",
+        ))
+    if RE_FLOATING_POINT_EXCEPTION.search(text):
+        alerts.append(DivergenceAlert(
+            type="floating_point_exception",
+            variable="(solver)",
+            message="Floating point exception detected — solver crashed.",
+        ))
+    return alerts

@@ -198,3 +198,23 @@ solvers
 
 def test_texto_vazio():
     assert foamlint.check_syntax("") == []
+
+
+def test_arquivo_log_nao_gera_alerta():
+    log_text = """/*---------------------------------------------------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Website:  https://openfoam.org                  |
+|   \\\\  /    A nd           | Version:  12                                    |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+Build : 12-86e126a7bc4d
+Exec : foamRun -parallel
+Date : Jul 31 2026
+Time : 13:38:26
+Host : "reynolds-02"
+PID : 637649
+"""
+    assert foamlint.check_syntax(log_text, "log.foamRun") == []
+    assert foamlint.is_openfoam_dict("log.foamRun", log_text) is False
+    assert foamlint.is_openfoam_dict("Allrun", "#!/bin/sh\n./Allclean") is False

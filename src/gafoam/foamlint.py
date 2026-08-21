@@ -5,6 +5,7 @@ comentários, strings e código C++ embutido neutralizados, de forma que o
 cabeçalho padrão do OpenFOAM e as listas multilinha não gerem alarmes falsos.
 """
 
+import os
 import re
 
 RE_STRING = re.compile(r'"[^"\n]*"')
@@ -146,12 +147,39 @@ def check_semicolons(lines):
     return None
 
 
-def check_syntax(text):
-    """Lista de problemas encontrados no dicionário (vazia se estiver íntegro).
+def is_openfoam_dict(file_path=None, text=""):
+    """Determina se um arquivo ou conteúdo é um dicionário OpenFOAM (sujeito a lint).
+
+    Arquivos de log, scripts de shell, binários ou textos comuns não devem ser
+    validados pelo linter de dicionários.
+    """
+    if file_path:
+        base = os.path.basename(file_path).lower()
+        if base.startswith("log.") or base.endswith(
+            (".log", ".sh", ".py", ".txt", ".csv", ".dat", ".stl", ".obj", ".png", ".jpg", ".md", ".json")
+        ):
+            return False
+        if base in ("allrun", "allclean", "makefile", ".gitignore", "readme"):
+            return False
+
+    if text:
+        first_chunk = text[:2000]
+        # Logs de execução do OpenFOAM contêm campos como 'Build :', 'Exec :' ou 'PID :'
+        if re.search(r"^\s*(Build\s*:|Exec\s*:|Host\s*:|PID\s*:|I/O\s*:|Slaves\s*:)", first_chunk, re.MULTILINE):
+            return False
+
+    return True
+
+
+def check_syntax(text, file_path=None):
+    """Lista de problemas encontrados no dicionário (vazia se estiver íntegro ou se não for um dicionário).
 
     Retorna no máximo um problema por vez: o primeiro erro estrutural costuma
     tornar os seguintes irrelevantes.
     """
+    if not is_openfoam_dict(file_path, text):
+        return []
+
     lines = clean_lines(text)
 
     error = check_brackets(lines)

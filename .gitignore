@@ -1,6 +1,9 @@
-sim_saudavel_189/__pycache__/
-*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
 .venv/
 caso_teste/
 relatorio_parcial_pibiti.*
 CODE_GUIDE.md
+

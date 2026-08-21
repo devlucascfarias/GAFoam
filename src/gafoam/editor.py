@@ -29,6 +29,14 @@ from gafoam import foamlint
 class CodeEditor(QPlainTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("CodeEditor")
+
+        font = QFont("Fira Code", 10)
+        font.setStyleHint(QFont.Monospace)
+        font.setFixedPitch(True)
+        self.setFont(font)
+        self.document().setDefaultFont(font)
+
 
         class LineNumberArea(QWidget):
             def __init__(self, editor):
@@ -76,7 +84,7 @@ class CodeEditor(QPlainTextEdit):
         extraSelections = []
         if not self.isReadOnly():
             selection = QTextEdit.ExtraSelection()
-            lineColor = QColor(232, 242, 255)
+            lineColor = QColor("#e8e8e8")
             selection.format.setBackground(lineColor)
             selection.format.setProperty(QTextCharFormat.FullWidthSelection, True)
             selection.cursor = self.textCursor()
@@ -86,7 +94,7 @@ class CodeEditor(QPlainTextEdit):
 
     def lineNumberAreaPaintEvent(self, event):
         painter = QPainter(self.lineNumberArea)
-        painter.fillRect(event.rect(), QColor(245, 245, 245))
+        painter.fillRect(event.rect(), QColor("#f4f4f4"))
         block = self.firstVisibleBlock()
         blockNumber = block.blockNumber()
         top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
@@ -95,7 +103,7 @@ class CodeEditor(QPlainTextEdit):
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
                 number = str(blockNumber + 1)
-                painter.setPen(QColor(120, 120, 120))
+                painter.setPen(QColor("#8d8d8d"))
                 painter.drawText(0, top, self.lineNumberArea.width() - 3, fm.height(), Qt.AlignRight, number)
             block = block.next()
             top = bottom
@@ -379,12 +387,12 @@ class FindReplaceBar(QWidget):
         self.editor = editor
         
         self.setStyleSheet(
-            "QWidget { background-color: #f8f9fa; border-bottom: 1px solid #ced4da; }"
-            "QLineEdit { border: 1px solid #ced4da; border-radius: 4px; padding: 3px 6px; background-color: #ffffff; color: #212529; }"
-            "QPushButton { padding: 3px 8px; border: 1px solid #ced4da; border-radius: 4px; background-color: #ffffff; color: #212529; }"
-            "QPushButton:hover { background-color: #e9ecef; }"
-            "QCheckBox { color: #495057; }"
-            "QLabel { color: #495057; }"
+            "QWidget { background-color: #f4f4f4; border-bottom: 1px solid #e0e0e0; }"
+            "QLineEdit { border: none; border-bottom: 1px solid #8d8d8d; border-radius: 0; padding: 3px 6px; background-color: #ffffff; color: #161616; }"
+            "QPushButton { padding: 3px 8px; border: none; border-radius: 0; background-color: transparent; color: #0f62fe; }"
+            "QPushButton:hover { background-color: #e8e8e8; }"
+            "QCheckBox { color: #525252; }"
+            "QLabel { color: #525252; }"
         )
         
         layout = QVBoxLayout(self)
@@ -393,44 +401,44 @@ class FindReplaceBar(QWidget):
         
         # Linha 1: Campo de Busca e botões
         row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Buscar:", self))
+        row1.addWidget(QLabel("Find:", self))
         self.txt_find = QLineEdit(self)
-        self.txt_find.setPlaceholderText("Procurar texto...")
+        self.txt_find.setPlaceholderText("Search text...")
         self.txt_find.textChanged.connect(self.find_next)
         row1.addWidget(self.txt_find, 1)
         
-        self.btn_prev = QPushButton("Anterior", self)
+        self.btn_prev = QPushButton("Previous", self)
         self.btn_prev.clicked.connect(self.find_prev)
         row1.addWidget(self.btn_prev)
         
-        self.btn_next = QPushButton("Próximo", self)
+        self.btn_next = QPushButton("Next", self)
         self.btn_next.clicked.connect(self.find_next)
         row1.addWidget(self.btn_next)
         
         self.chk_case = QCheckBox("Case sensitive", self)
         row1.addWidget(self.chk_case)
         
-        self.chk_word = QCheckBox("Palavra inteira", self)
+        self.chk_word = QCheckBox("Whole word", self)
         row1.addWidget(self.chk_word)
         
         layout.addLayout(row1)
         
         # Linha 2: Campo de Substituição e botões de ação
         row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Substituir:", self))
+        row2.addWidget(QLabel("Replace:", self))
         self.txt_replace = QLineEdit(self)
-        self.txt_replace.setPlaceholderText("Substituir por...")
+        self.txt_replace.setPlaceholderText("Replace with...")
         row2.addWidget(self.txt_replace, 1)
         
-        self.btn_replace = QPushButton("Substituir", self)
+        self.btn_replace = QPushButton("Replace", self)
         self.btn_replace.clicked.connect(self.replace)
         row2.addWidget(self.btn_replace)
         
-        self.btn_replace_all = QPushButton("Todos", self)
+        self.btn_replace_all = QPushButton("All", self)
         self.btn_replace_all.clicked.connect(self.replace_all)
         row2.addWidget(self.btn_replace_all)
         
-        self.btn_close = QPushButton("Fechar (Esc)", self)
+        self.btn_close = QPushButton("Close (Esc)", self)
         self.btn_close.clicked.connect(self.hide_bar)
         row2.addWidget(self.btn_close)
         
@@ -455,7 +463,6 @@ class FindReplaceBar(QWidget):
         flags = self.get_find_flags()
         found = self.editor.find(query, flags)
         if not found:
-            # Wrap around (volta ao início)
             cursor = self.editor.textCursor()
             cursor.movePosition(cursor.Start)
             self.editor.setTextCursor(cursor)
@@ -468,7 +475,6 @@ class FindReplaceBar(QWidget):
         flags = self.get_find_flags() | QTextDocument.FindBackward
         found = self.editor.find(query, flags)
         if not found:
-            # Wrap around (volta ao final)
             cursor = self.editor.textCursor()
             cursor.movePosition(cursor.End)
             self.editor.setTextCursor(cursor)
@@ -509,8 +515,9 @@ class FindReplaceBar(QWidget):
 class EditorContainerWidget(QWidget):
     """Container que envolve o CodeEditor com barra de busca (Ctrl+F) e linter (Sintaxe)."""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, file_path=None):
         super().__init__(parent)
+        self.file_path = file_path
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -525,10 +532,10 @@ class EditorContainerWidget(QWidget):
         layout.addWidget(self.editor)
         
         # Barra inferior do linter
-        self.linter_lbl = QLabel("✓ Sintaxe: OK", self)
+        self.linter_lbl = QLabel("Syntax: OK", self)
         self.linter_lbl.setStyleSheet(
-            "background-color: #e6f4ea; color: #137333; "
-            "font-size: 9pt; padding: 4px 8px; border-top: 1px solid #ced4da;"
+            "background-color: #defbe6; color: #198038; "
+            "font-size: 9pt; padding: 4px 8px; border-top: 1px solid #e0e0e0;"
         )
         layout.addWidget(self.linter_lbl)
         
@@ -553,23 +560,29 @@ class EditorContainerWidget(QWidget):
         self.linter_timer.start()
         
     def run_linter(self):
-        errors = self.check_syntax(self.editor.toPlainText())
+        text = self.editor.toPlainText()
+        if not foamlint.is_openfoam_dict(self.file_path, text):
+            self.linter_lbl.hide()
+            return
+
+        self.linter_lbl.show()
+        errors = self.check_syntax(text, self.file_path)
         
         if errors:
-            self.linter_lbl.setText(f"⚠️ {errors[0]}")
+            self.linter_lbl.setText(f"Error: {errors[0]}")
             self.linter_lbl.setStyleSheet(
-                "background-color: #fce8e6; color: #c5221f; "
-                "font-size: 9pt; padding: 4px 8px; border-top: 1px solid #ced4da;"
+                "background-color: #fff1f1; color: #da1e28; "
+                "font-size: 9pt; padding: 4px 8px; border-top: 1px solid #e0e0e0;"
             )
         else:
-            self.linter_lbl.setText("✓ Sintaxe: OK")
+            self.linter_lbl.setText("Syntax: OK")
             self.linter_lbl.setStyleSheet(
-                "background-color: #e6f4ea; color: #137333; "
-                "font-size: 9pt; padding: 4px 8px; border-top: 1px solid #ced4da;"
+                "background-color: #defbe6; color: #198038; "
+                "font-size: 9pt; padding: 4px 8px; border-top: 1px solid #e0e0e0;"
             )
             
 
     @staticmethod
-    def check_syntax(text):
+    def check_syntax(text, file_path=None):
         """Problemas sintáticos do dicionário aberto (ver `gafoam.foamlint`)."""
-        return foamlint.check_syntax(text)
+        return foamlint.check_syntax(text, file_path=file_path)

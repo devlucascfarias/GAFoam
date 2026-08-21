@@ -23,7 +23,7 @@ gafoam = "gafoam.app:run"
 where = ["src"]
 
 [tool.setuptools.package-data]
-gafoam = ["icons/*.svg", "modules/*/icons/*.svg"]
+gafoam = ["icons/*.svg", "modules/*/icons/*.svg", "fonts/*.ttf"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
