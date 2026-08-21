@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QSizePolicy
 )
 from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QIcon, QFont
+from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QIcon, QFont, QImage
 
 
 def check_mesh_quality(mesh):
@@ -161,9 +161,12 @@ class STLViewer(QWidget):
                 ih, iw, ic = img.shape
                 bytes_per_line = ic * iw
                 qimg = QImage(img.data.tobytes(), iw, ih, bytes_per_line, QImage.Format_RGB888)
-                self.lbl_render.setPixmap(QPixmap.fromImage(qimg))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error in update_render: {e}")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.update_render()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -667,6 +670,11 @@ class CaseGeometryWidget(QWidget):
             self.mesh_list.blockSignals(False)
             if self.viewer.plotter:
                 self.viewer.plotter.clear()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.viewer:
+            self.viewer.update_render()
 
     def refresh_scan(self):
         if self.current_case_path:
