@@ -47,13 +47,10 @@ def _ensure_openfoam_env():
                 for line in res.stdout.splitlines():
                     if "=" in line:
                         k, _, v = line.partition("=")
-                        if k in [
-                            "PATH", "LD_LIBRARY_PATH", "WM_PROJECT_DIR", "WM_PROJECT", 
-                            "WM_PROJECT_VERSION", "FOAM_APP", "FOAM_SRC", "FOAM_LIBBIN", 
-                            "FOAM_APPBIN", "FOAM_USER_APPBIN", "FOAM_USER_LIBBIN", 
-                            "FOAM_RUN", "FOAM_TUTORIALS", "WM_OPTIONS", "WM_COMPILER",
-                            "WM_ARCH", "WM_PRECISION_OPTION"
-                        ]:
+                        if (
+                            k.startswith(("WM_", "FOAM_", "MPI_", "PARA_", "BOOST_", "CGAL_"))
+                            or k in ("PATH", "LD_LIBRARY_PATH", "MANPATH")
+                        ):
                             os.environ[k] = v
         except Exception:
             pass
