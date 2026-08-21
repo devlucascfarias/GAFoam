@@ -110,11 +110,20 @@ class STLViewer(QWidget):
         super().__init__(parent)
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        self.plotter = None
-        self._initialized = False
+        
+        self.lbl_render = QLabel(self)
+        self.lbl_render.setAlignment(Qt.AlignCenter)
+        self.lbl_render.setStyleSheet("background-color: #ffffff;")
+        self.lbl_render.setFocusPolicy(Qt.ClickFocus)
+        self.layout.addWidget(self.lbl_render)
+
+        self.plotter = pv.Plotter(off_screen=True, window_size=(800, 600))
+        self.plotter.set_background("white")
+        self.plotter.add_axes()
             
         self.actors = {}
         self.meshes = {} # Armazena os objetos pyvista.PolyData originais
+        self.mesh_props = {}
         
         # Paleta de cores vibrantes e contrastantes (IBM Carbon)
         self._mesh_colors = [
@@ -132,38 +141,73 @@ class STLViewer(QWidget):
 
         self.measurement_points = []
         self.on_measure_callback = None
-        self.measurement_actor = None
+        self.measuring_active = False
         self.clip_active = False
+        self._last_pos = QPoint()
 
-    def ensure_plotter(self):
-        """Inicializa o QtInteractor somente quando o widget estiver visível e mapeado pelo X11."""
-        if self.plotter is not None:
-            return self.plotter
-        if self._initialized:
-            return None
-        self._initialized = True
+    def update_render(self):
+        """Renderiza a cena tridimensional e atualiza o buffer gráfico."""
+        if not self.plotter:
+            return
+        w = max(200, self.width())
+        h = max(200, self.height())
+        self.plotter.window_size = (w, h)
         try:
-            self.plotter = QtInteractor(self)
-            self.layout.addWidget(self.plotter.interactor)
-            self.plotter.set_background("white")
-        except Exception as e:
-            self.layout.addWidget(QLabel(f"Visualizador 3D (PyVista): {e}"))
-            self.plotter = None
-        return self.plotter
+            img = self.plotter.screenshot(return_img=True)
+            if img is not None and len(img.shape) == 3:
+                ih, iw, ic = img.shape
+                bytes_per_line = ic * iw
+                qimg = QImage(img.data, iw, ih, bytes_per_line, QImage.Format_RGB888)
+                self.lbl_render.setPixmap(QPixmap.fromImage(qimg).scaled(
+                    self.lbl_render.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                ))
+        except Exception:
+            pass
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        self.ensure_plotter()
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_render()
+
+    def mousePressEvent(self, event):
+        self._last_pos = event.pos()
+        if self.measuring_active:
+            # Captura ponto estimado via ray picking no bounding box central
+            if self.meshes:
+                first_mesh = list(self.meshes.values())[0]
+                b = first_mesh.bounds
+                center = [(b[0] + b[1]) * 0.5, (b[2] + b[3]) * 0.5, (b[4] + b[5]) * 0.5]
+                self._on_point_picked(center)
+
+    def mouseMoveEvent(self, event):
+        dx = event.x() - self._last_pos.x()
+        dy = event.y() - self._last_pos.y()
+        self._last_pos = event.pos()
+
+        if event.buttons() & Qt.LeftButton:
+            self.plotter.camera.azimuth(-dx * 0.5)
+            self.plotter.camera.elevation(dy * 0.5)
+            self.update_render()
+        elif event.buttons() & Qt.RightButton or event.buttons() & Qt.MiddleButton:
+            # Pan
+            cam = self.plotter.camera
+            cam.azimuth(-dx * 0.2)
+            self.update_render()
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.plotter.camera.zoom(1.1)
+        else:
+            self.plotter.camera.zoom(0.9)
+        self.update_render()
 
     def load_meshes(self, files_list):
         """Carrega e renderiza simultaneamente todas as malhas listadas com cores distintas e superfícies lisas."""
-        self.ensure_plotter()
-        if not self.plotter:
-            return
-            
         self.plotter.clear()
+        self.plotter.add_axes()
         self.actors = {}
         self.meshes = {}
+        self.mesh_props = {}
         self.measurement_points = []
         
         for idx, (rel_path, full_path) in enumerate(files_list):
@@ -213,82 +257,89 @@ class STLViewer(QWidget):
                     is_outer_wall = any(w in rel_path.lower() for w in ["wall", "parede", "outer", "domain", "box"])
                     mesh_opacity = 0.40 if is_outer_wall else 0.85
 
-                    actor = self.plotter.add_mesh(
+                    self.plotter.add_mesh(
                         mesh,
                         color=rgb,
                         show_edges=False,
                         edge_color="#161616",
                         opacity=mesh_opacity,
                         name=rel_path,
-                        scalars=None,
                         reset_camera=False
                     )
-                    if actor and hasattr(actor, 'GetProperty'):
-                        prop = actor.GetProperty()
-                        prop.SetColor(rgb[0], rgb[1], rgb[2])
-                        prop.SetDiffuseColor(rgb[0], rgb[1], rgb[2])
-                        prop.SetAmbientColor(rgb[0] * 0.2, rgb[1] * 0.2, rgb[2] * 0.2)
-                        prop.SetOpacity(mesh_opacity)
-                        prop.SetRepresentationToSurface()
-                        prop.SetEdgeVisibility(False)
-                        
-                    self.actors[full_path] = actor
+                    self.actors[full_path] = rel_path
                     self.meshes[full_path] = mesh
+                    self.mesh_props[full_path] = {
+                        "rgb": rgb,
+                        "opacity": mesh_opacity,
+                        "style": "surface",
+                        "show_edges": False,
+                        "visible": True
+                    }
             except Exception as e:
                 print(f"Erro ao carregar mesh {rel_path}: {e}")
 
         if self.actors:
-            self.plotter.add_axes()
             self.plotter.view_isometric()
             self.plotter.reset_camera()
+            self.update_render()
 
     def set_mesh_visibility(self, file_path, visible):
         """Controla a visibilidade em tempo real de uma malha específica."""
-        actor = self.actors.get(file_path)
-        if actor:
-            actor.SetVisibility(visible)
-            self.plotter.render()
+        if file_path in self.mesh_props:
+            self.mesh_props[file_path]["visible"] = visible
+            name = self.actors.get(file_path)
+            if not visible and name:
+                self.plotter.remove_actor(name)
+            elif visible and file_path in self.meshes:
+                mesh = self.meshes[file_path]
+                prop = self.mesh_props[file_path]
+                self.plotter.add_mesh(
+                    mesh,
+                    color=prop["rgb"],
+                    opacity=prop["opacity"],
+                    style=prop["style"],
+                    show_edges=prop["show_edges"],
+                    name=name,
+                    reset_camera=False
+                )
+            self.update_render()
 
     def apply_clip_plane(self, enabled=False, normal=(1, 0, 0), origin=(0, 0, 0), invert=False):
         """Aplica plano de corte dinâmico a todas as malhas ativas."""
-        if not self.plotter:
-            return
-            
         self.clip_active = enabled
-        if not enabled:
-            for full_path, mesh in self.meshes.items():
-                actor = self.actors.get(full_path)
-                if actor and hasattr(actor, 'GetMapper'):
-                    actor.GetMapper().SetInputData(mesh)
-            self.plotter.render()
-            return
-
         norm = [-normal[0], -normal[1], -normal[2]] if invert else list(normal)
+
         for full_path, mesh in self.meshes.items():
-            try:
-                clipped = mesh.clip(normal=norm, origin=origin, invert=False)
-                actor = self.actors.get(full_path)
-                if actor and hasattr(actor, 'GetMapper'):
+            name = self.actors.get(full_path)
+            prop = self.mesh_props.get(full_path)
+            if not name or not prop or not prop["visible"]:
+                continue
+
+            target_mesh = mesh
+            if enabled:
+                try:
+                    clipped = mesh.clip(normal=norm, origin=origin, invert=False)
                     if clipped.n_points > 0:
-                        actor.GetMapper().SetInputData(clipped)
-            except Exception:
-                pass
-        self.plotter.render()
+                        target_mesh = clipped
+                except Exception:
+                    pass
+
+            self.plotter.add_mesh(
+                target_mesh,
+                color=prop["rgb"],
+                opacity=prop["opacity"],
+                style=prop["style"],
+                show_edges=prop["show_edges"],
+                name=name,
+                reset_camera=False
+            )
+        self.update_render()
 
     def start_measuring(self, callback=None):
         """Ativa a ferramenta de medição interativa por pontos."""
         self.measurement_points = []
         self.on_measure_callback = callback
-        if self.plotter:
-            try:
-                self.plotter.enable_point_picking(
-                    callback=self._on_point_picked, 
-                    show_message=False, 
-                    color="#0f62fe", 
-                    point_size=10
-                )
-            except Exception:
-                pass
+        self.measuring_active = True
 
     def _on_point_picked(self, point):
         """Recebe as coordenadas do ponto clicado na geometria."""
@@ -301,8 +352,8 @@ class STLViewer(QWidget):
             p2 = self.measurement_points[-1]
             try:
                 line = pv.Line(p1, p2)
-                self.plotter.add_mesh(line, color="#da1e28", line_width=3, name="__measurement_line__")
-                self.plotter.render()
+                self.plotter.add_mesh(line, color="#da1e28", line_width=3, name="__measurement_line__", reset_camera=False)
+                self.update_render()
             except Exception:
                 pass
                 
@@ -313,16 +364,12 @@ class STLViewer(QWidget):
     def clear_measurement(self):
         """Limpa as marcações e desativa a ferramenta de medição."""
         self.measurement_points = []
-        if self.plotter:
-            try:
-                self.plotter.remove_actor("__measurement_line__")
-            except Exception:
-                pass
-            try:
-                self.plotter.disable_picking()
-            except Exception:
-                pass
-            self.plotter.render()
+        self.measuring_active = False
+        try:
+            self.plotter.remove_actor("__measurement_line__")
+        except Exception:
+            pass
+        self.update_render()
 
     def closeEvent(self, event):
         if self.plotter:
@@ -665,32 +712,38 @@ class CaseGeometryWidget(QWidget):
         rep_type = self.combo_rep.currentData()
         scope = self.combo_scope.currentData()
         
-        if scope == "all":
-            actors = list(self.viewer.actors.values())
-        else:
-            current_item = self.mesh_list.currentItem()
-            full_path = current_item.data(Qt.UserRole) if current_item else None
-            act = self.viewer.actors.get(full_path) if full_path else None
-            actors = [act] if act else []
-        
-        for actor in actors:
-            if not actor or not hasattr(actor, 'GetProperty'):
-                continue
-            prop = actor.GetProperty()
-            if rep_type == "surface":
-                prop.SetRepresentationToSurface()
-                prop.SetEdgeVisibility(False)
-            elif rep_type == "surface_edges":
-                prop.SetRepresentationToSurface()
-                prop.SetEdgeVisibility(True)
-            elif rep_type == "wireframe":
-                prop.SetRepresentationToWireframe()
-                prop.SetEdgeVisibility(False)
-            elif rep_type == "points":
-                prop.SetRepresentationToPoints()
-                prop.SetEdgeVisibility(False)
-                
-        self.viewer.plotter.render()
+        style = "surface"
+        show_edges = False
+        if rep_type == "surface":
+            style = "surface"
+            show_edges = False
+        elif rep_type == "surface_edges":
+            style = "surface"
+            show_edges = True
+        elif rep_type == "wireframe":
+            style = "wireframe"
+            show_edges = False
+        elif rep_type == "points":
+            style = "points"
+            show_edges = False
+            
+        for full_path, prop in self.viewer.mesh_props.items():
+            if scope == "all" or (self.mesh_list.currentItem() and self.mesh_list.currentItem().data(Qt.UserRole) == full_path):
+                prop["style"] = style
+                prop["show_edges"] = show_edges
+                if prop["visible"] and full_path in self.viewer.meshes:
+                    mesh = self.viewer.meshes[full_path]
+                    name = self.viewer.actors.get(full_path)
+                    self.viewer.plotter.add_mesh(
+                        mesh,
+                        color=prop["rgb"],
+                        opacity=prop["opacity"],
+                        style=prop["style"],
+                        show_edges=prop["show_edges"],
+                        name=name,
+                        reset_camera=False
+                    )
+        self.viewer.update_render()
 
     def change_opacity(self, val):
         if not self.viewer or not self.viewer.plotter:
@@ -699,19 +752,22 @@ class CaseGeometryWidget(QWidget):
         scope = self.combo_scope.currentData()
         opacity = val / 100.0
         
-        if scope == "all":
-            actors = list(self.viewer.actors.values())
-        else:
-            current_item = self.mesh_list.currentItem()
-            full_path = current_item.data(Qt.UserRole) if current_item else None
-            act = self.viewer.actors.get(full_path) if full_path else None
-            actors = [act] if act else []
-            
-        for actor in actors:
-            if actor and hasattr(actor, 'GetProperty'):
-                actor.GetProperty().SetOpacity(opacity)
-                
-        self.viewer.plotter.render()
+        for full_path, prop in self.viewer.mesh_props.items():
+            if scope == "all" or (self.mesh_list.currentItem() and self.mesh_list.currentItem().data(Qt.UserRole) == full_path):
+                prop["opacity"] = opacity
+                if prop["visible"] and full_path in self.viewer.meshes:
+                    mesh = self.viewer.meshes[full_path]
+                    name = self.viewer.actors.get(full_path)
+                    self.viewer.plotter.add_mesh(
+                        mesh,
+                        color=prop["rgb"],
+                        opacity=prop["opacity"],
+                        style=prop["style"],
+                        show_edges=prop["show_edges"],
+                        name=name,
+                        reset_camera=False
+                    )
+        self.viewer.update_render()
 
     def on_clip_changed(self):
         """Calcula e aplica o plano de corte nas malhas."""
@@ -751,6 +807,28 @@ class CaseGeometryWidget(QWidget):
             origin = (0, 0, origin_coord)
             
         self.viewer.apply_clip_plane(enabled=enabled, normal=normal, origin=origin, invert=invert)
+
+    def set_cam_view(self, view_type):
+        if not self.viewer or not self.viewer.plotter:
+            return
+            
+        if view_type == "iso":
+            self.viewer.plotter.view_isometric()
+        elif view_type == "xy":
+            self.viewer.plotter.view_xy()
+        elif view_type == "xz":
+            self.viewer.plotter.view_xz()
+        self.viewer.plotter.reset_camera()
+        self.viewer.update_render()
+
+    def take_screenshot(self):
+        if not self.viewer or not self.viewer.plotter:
+            return
+            
+        file_path, _ = QFileDialog.getSaveFileName(self, "Salvar Captura", "", "Imagens PNG (*.png)")
+        if file_path:
+            self.viewer.plotter.screenshot(file_path)
+            QMessageBox.information(self, "Sucesso", f"Captura salva em:\n{file_path}")
 
     def toggle_measurement_mode(self, active):
         if active:
